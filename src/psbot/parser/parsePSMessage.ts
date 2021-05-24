@@ -1,4 +1,5 @@
 /** @file Exposes the `parsePSMessage` function. */
+import { Protocol } from "@pkmn/protocol";
 import { BoostName, boostNames } from "../../battle/dex/dex-util";
 import { Logger } from "../../Logger";
 import { PlayerID } from "../helpers";
@@ -8,9 +9,35 @@ import { anyWord, boostName, integer, json, majorStatus, parseBoostName,
     playerIdWithName, pokemonDetails, pokemonId, pokemonStatus, restOfLine,
     skipLine, weatherTypeOrNone, word } from "./helpers";
 import { iter } from "./Iter";
+import { MessageHandler } from "./MessageHandler";
 import * as psevent from "./PSBattleEvent";
 import * as psmsg from "./PSMessage";
 import { Info, Input, Parser, Result } from "./types";
+
+/**
+ * Parses a message from a Pokemon Showdown server room.
+ * @param data Message(s) to be parsed.
+ * @returns The room that the messages were sent from, as well as the parsed
+ * Messages.
+ */
+export async function parsePSMessage(data: string):
+    Promise<{room: string, messages: psmsg.Any[]}>
+{
+    const result = {room: "", messages: [] as psmsg.Any[]};
+    const mh = new MessageHandler();
+    for await (const {roomid, args, kwArgs} of Protocol.parse(data))
+    {
+        if (!result.room) result.room = roomid;
+        else if (result.room !== roomid)
+        {
+            throw new Error(`Changed rooms midway: '${result.room}' to ` +
+                `'${roomid}'`);
+        }
+        const msg = mh.dispatch(args, kwArgs);
+        if (msg) result.messages.push(msg);
+    }
+    return result;
+}
 
 /**
  * Parses a message from a PokemonShowdown server.
@@ -19,7 +46,7 @@ import { Info, Input, Parser, Result } from "./types";
  * @returns The room that the messages were sent from, as well as the parsed
  * Messages.
  */
-export function parsePSMessage(data: string, logger = Logger.stderr):
+/*export function parsePSMessagee(data: string, logger = Logger.stderr):
     {room: string, messages: psmsg.Any[]}
 {
     const {room, pos} = parseRoom(data);
@@ -37,7 +64,7 @@ export function parsePSMessage(data: string, logger = Logger.stderr):
     const input = iter(words);
 
     return {room, messages: messages(input, info)};
-}
+}*/
 
 /**
  * Parses room name.
