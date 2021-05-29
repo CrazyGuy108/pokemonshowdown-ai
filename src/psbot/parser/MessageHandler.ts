@@ -3,17 +3,46 @@ import { isPlayerID } from "../helpers";
 import { BaseHandler } from "./BaseHandler";
 import * as psmsg from "./PSMessage";
 
-type DeepPartial<T> =
-    T extends object | any[] ? {-readonly [K in keyof T]?: DeepPartial<T[K]>}
-    : T | undefined;
+type Writable<T> = {-readonly [K in keyof T]: T[K]};
 
-type BattleInitContext = DeepPartial<psmsg.BattleInit>;
+type BattleInitContext =
+    Partial<Writable<Omit<psmsg.BattleInit, "type" | "teamSizes">>> &
+{
+    type: psmsg.BattleInit["type"];
+    teamSizes?: Partial<Writable<psmsg.BattleInit["teamSizes"]>>;
+};
 
 type MessageHandlerContext = BattleInitContext;
 
 export class MessageHandler extends BaseHandler<psmsg.Any>
 {
-    private context?: MessageHandlerContext;
+    private context: MessageHandlerContext | null = null;
+
+    public done(): psmsg.Any | null
+    {
+        const ctx = this.context;
+        switch (ctx?.type)
+        {
+            case "battleInit":
+                if (MessageHandler.validateBattleInit(ctx))
+                {
+                    const event: psmsg.BattleInit = ctx;
+                    this.context = null;
+                    return event;
+                }
+                break;
+        }
+        return null;
+    }
+
+    private static validateBattleInit(ctx: BattleInitContext):
+        ctx is psmsg.BattleInit
+    {
+        ctx.rules ??= [];
+        ctx.events ??= [];
+        return !!(ctx.id && ctx.username && ctx.teamSizes?.p1 &&
+            ctx.teamSizes.p2 && ctx.gen);
+    }
 
     public "|init|"(args: Args["|init|"]): psmsg.Init
     {
@@ -47,7 +76,8 @@ export class MessageHandler extends BaseHandler<psmsg.Any>
         if (!username) return;
 
         this.context ??= {type: "battleInit"};
-        ({...this.context} = {id, username});
+        this.context.id = id;
+        this.context.username = username;
     }
     public "|teamsize|"(args: Args["|teamsize|"])
     {
@@ -67,13 +97,13 @@ export class MessageHandler extends BaseHandler<psmsg.Any>
     {
         const gen = args[1];
         this.context ??= {type: "battleInit"};
-        ({...this.context} = {gen});
+        this.context.gen = gen;
     }
     public "|tier|"(args: Args["|tier|"])
     {
         const tier = args[1];
         this.context ??= {type: "battleInit"};
-        ({...this.context} = {tier});
+        this.context.tier = tier;
     }
     public "|rated|"(args: Args["|rated|"])
     {

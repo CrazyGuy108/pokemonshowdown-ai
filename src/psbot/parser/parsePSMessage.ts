@@ -36,6 +36,8 @@ export async function parsePSMessage(data: string):
         const msg = mh.dispatch(args, kwArgs);
         if (msg) result.messages.push(msg);
     }
+    const last = mh.done();
+    if (last) result.messages.push(last);
     return result;
 }
 
