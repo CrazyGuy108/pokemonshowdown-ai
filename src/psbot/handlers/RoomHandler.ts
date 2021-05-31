@@ -1,4 +1,4 @@
-import * as psmsg from "./parser/PSMessage";
+import * as psmsg from "../parser/PSMessage";
 
 /** Handles messages that come from a battle room. */
 export interface RoomHandler

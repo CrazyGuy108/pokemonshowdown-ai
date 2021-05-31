@@ -1,6 +1,6 @@
 /** @file Exposes the `parsePSMessage` function. */
 import { Protocol } from "@pkmn/protocol";
-import { BoostName, boostNames } from "../../battle/dex/dex-util";
+import { BoostName, boostNames } from "../handlers/battle/formats/gen4/dex/dex-util";
 import { Logger } from "../../Logger";
 import { PlayerID } from "../helpers";
 import { maybe, sequence, transform } from "./combinators";

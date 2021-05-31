@@ -2,7 +2,7 @@
  * @file Interfaces and helper functions for dealing with the arguments of a
  * MessageHandler.
  */
-import { MoveTarget } from "../../battle/dex/dex-util";
+import { MoveTarget } from "../handlers/battle/formats/gen4/dex/dex-util";
 import { InitPokemon } from "../../battle/parser/BattleEvent";
 import { PlayerID, PokemonDetails, PokemonID, PokemonStatus, RoomType } from
     "../helpers";

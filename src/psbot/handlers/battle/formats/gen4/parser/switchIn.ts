@@ -1,7 +1,7 @@
-import * as dex from "../../dex/dex";
-import { Side } from "../../state/Side";
-import { SubParserConfig, SubParserResult } from "../BattleParser";
-import { consume, tryPeek, verify } from "../helpers";
+import * as dex from "../dex/dex";
+import { Side } from "../state/Side";
+import { SubParserConfig, SubParserResult } from "../../../../../../battle/parser/BattleParser";
+import { consume, tryPeek, verify } from "../../../../../../battle/parser/helpers";
 import * as ability from "./activateAbility";
 import { SuccessResult } from "./parsers";
 import { useMove } from "./useMove";

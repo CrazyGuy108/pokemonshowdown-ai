@@ -1,11 +1,11 @@
 /** @file SubParsers used to expect specific kinds of events. */
-import * as dexutil from "../../dex/dex-util";
-import { Pokemon, ReadonlyPokemon } from "../../state/Pokemon";
-import { Side } from "../../state/Side";
-import * as events from "../BattleEvent";
-import { SubParserConfig, SubParserResult } from "../BattleParser";
+import * as dexutil from "../dex/dex-util";
+import { Pokemon, ReadonlyPokemon } from "../state/Pokemon";
+import { Side } from "../state/Side";
+import * as events from "../../../../../../battle/parser/BattleEvent";
+import { SubParserConfig, SubParserResult } from "../../../../../../battle/parser/BattleParser";
 import { eventLoop, hasStatus, matchBoost, matchPercentDamage, peek, tryPeek }
-    from "../helpers";
+    from "../../../../../../battle/parser/helpers";
 import { handlers as base } from "./base";
 import { consumeOnUpdate } from "./removeItem";
 

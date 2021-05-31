@@ -1,9 +1,9 @@
+import { Protocol } from "@pkmn/protocol";
 import fetch, { RequestInit } from "node-fetch";
 import { client as WSClient } from "websocket";
 import { Logger } from "../Logger";
-import { parsePSMessage } from "./parser/parsePSMessage";
-import * as psmsg from "./parser/PSMessage";
-import { RoomHandler } from "./RoomHandler";
+import { GlobalHandler } from "./handlers/global";
+import { MessageParser, ProtocolMsg } from "./MessageParser";
 
 /** Options for login. */
 export interface LoginOptions
@@ -30,26 +30,42 @@ export type Sender = (...responses: string[]) => boolean;
  * @param sender The function that will be used for sending responses.
  */
 export type HandlerFactory = (room: string, username: string, sender: Sender) =>
-    RoomHandler;
+    Protocol.Handler;
 
 /** Manages the connection to a PokemonShowdown server. */
 export class PSBot
 {
     /** Websocket client. Used for connecting to the server. */
     private readonly client = new WSClient();
-    /** Tracks current room handlers. */
-    private readonly rooms: {[room: string]: RoomHandler} = {};
+    /** Current active rooms. */
+    private readonly rooms: {[room: string]: Protocol.Handler} = {};
     /** Dictionary of accepted formats for battle challenges. */
     private readonly formats: {[format: string]: HandlerFactory} = {};
-    /** Username of the client. */
+
+    /** Whether we've already logged in. */
+    private loggedIn = false;
+    /** Username of the client. Initialized on login. */
     private username?: string;
-    /** Callback for when the challstr is received. */
-    private challstr: (challstr: string) => Promise<void> = async function() {};
+
     /** Sends a response to the server. */
     private sender: Sender =
         () => { throw new Error("Sender not initialized"); }
-    /** Function to call to resolve the `#connect()` Promise. */
-    private connected: (err?: Error) => void = () => {};
+
+    /** Promise that resolves once we've connected to the server. */
+    private connected = new Promise<void>((res, rej) =>
+        this.connectedRes = err =>
+        {
+            this.connectedRes = () => {};
+            if (!err) res();
+            else rej(err);
+        });
+    /** Callback to resolve the `#connected` Promise. */
+    private connectedRes: (err?: Error) => void = () => {};
+
+    /** Used for handling global PS messages. */
+    private readonly globalHandler = new GlobalHandler();
+    /** Stream used for parsing PS protocol messages. */
+    private readonly parser = new MessageParser();
 
     /**
      * Creates a PSBot.
@@ -57,7 +73,16 @@ export class PSBot
      */
     constructor(private readonly logger = Logger.stderr)
     {
+        this.rooms[""] = this.globalHandler;
         this.initClient();
+        this.globalHandler.updateUser = username => this.updateUser(username);
+        this.globalHandler.respondToChallenge =
+            (user, format) => this.respondToChallenge(user, format);
+
+        // async
+        // TODO: tie this to a method that can be awaited after setting up the
+        //  PSBot
+        this.parserReadLoop();
     }
 
     /**
@@ -70,99 +95,101 @@ export class PSBot
         this.formats[format] = fn;
     }
 
-    /** Connects to the server and starts handling messages. */
-    public connect(url: string): Promise<void>
+    /**
+     * Adds a handler for a room.
+     * @param room Room name.
+     * @param handler Object that handles messages coming from the given room.
+     */
+    public addHandler(room: string, handler: Protocol.Handler): void
     {
-        this.client.connect(url);
-        return new Promise((res, rej) =>
+        if (this.rooms.hasOwnProperty(room))
         {
-            this.connected = err =>
-            {
-                // reset connected callback, since the promise is now resolved
-                this.connected = () => {};
-
-                if (!err) res();
-                else rej(err);
-            };
-        });
+            throw new Error(`Already have a handler for room '${room}'`);
+        }
+        this.rooms[room] = handler;
     }
 
-    /** Sets up this PSBot to login once connected. */
-    public login(options: LoginOptions): Promise<void>
+    // TODO: support reconnects/disconnects
+    /** Connects to the server and starts handling messages. */
+    public async connect(url: string): Promise<void>
     {
-        return new Promise((res, rej) =>
+        this.client.connect(url);
+        return await this.connected;
+    }
+
+    /**
+     * Sets up this PSBot to login once connected.
+     * @param options Login options.
+     * @returns A Promise that resolves once logged in.
+     */
+    public async login(options: LoginOptions): Promise<void>
+    {
+        if (this.loggedIn)
         {
-            this.challstr = async challstr =>
+            // TODO: add logout functionality?
+            return this.logger.error("Already logged in");
+        }
+
+        this.logger.debug("Configured to login under username " +
+            `'${options.username}'`);
+
+        const challstr = await this.globalHandler.challstr;
+
+        const init: RequestInit =
+        {
+            method: "POST",
+            headers: {"Content-Type": "application/x-www-form-urlencoded"}
+        };
+
+        // get the assertion string used to confirm login
+        let assertion: string;
+
+        if (!options.password)
+        {
+            // login without password
+            init.body = `act=getassertion&userid=${options.username}` +
+                `&challstr=${challstr}`;
+            const result = await fetch(options.loginServer, init);
+            assertion = await result.text();
+
+            if (assertion.startsWith(";"))
             {
-                // challstr callback consumed, no need to call again
-                this.challstr = async function() {};
-
-                const init: RequestInit =
+                // login attempt was rejected
+                if (assertion.startsWith(";;"))
                 {
-                    method: "POST",
-                    headers:
-                    {
-                        "Content-Type": "application/x-www-form-urlencoded"
-                    }
-                };
-
-                // get the assertion string used to confirm login
-                let assertion: string;
-
-                if (!options.password)
-                {
-                    // login without password
-                    init.body = `act=getassertion&userid=${options.username}` +
-                        `&challstr=${challstr}`;
-                    const result = await fetch(options.loginServer, init);
-                    assertion = await result.text();
-
-                    if (assertion.startsWith(";"))
-                    {
-                        // login attempt was rejected
-                        if (assertion.startsWith(";;"))
-                        {
-                            // error message was provided
-                            rej(new Error(assertion.substr(2)));
-                        }
-                        else
-                        {
-                            rej(new Error(
-                                    "A password is required for this account"));
-                        }
-                        return;
-                    }
+                    // error message was provided
+                    throw new Error(assertion.substr(2));
                 }
-                else
+                throw new Error("A password is required for user " +
+                    `'${options.username}'`);
+            }
+        }
+        else
+        {
+            // login with password
+            init.body = `act=login&name=${options.username}` +
+                `&pass=${options.password}&challstr=${challstr}`;
+            const result = await fetch(options.loginServer, init);
+            const text = await result.text();
+            // response text returns "]" followed by json
+            const json = JSON.parse(text.substr(1));
+
+            assertion = json.assertion;
+            if (!json.actionsuccess)
+            {
+                // login attempt was rejected
+                if (assertion.startsWith(";;"))
                 {
-                    // login with password
-                    init.body = `act=login&name=${options.username}` +
-                        `&pass=${options.password}&challstr=${challstr}`;
-                    const result = await fetch(options.loginServer, init);
-                    const text = await result.text();
-                    // response text returns "]" followed by json
-                    const json = JSON.parse(text.substr(1));
-
-                    assertion = json.assertion;
-                    if (!json.actionsuccess)
-                    {
-                        // login attempt was rejected
-                        if (assertion.startsWith(";;"))
-                        {
-                            // error message was provided
-                            rej(new Error(assertion.substr(2)));
-                        }
-                        else rej(new Error("Invalid password"));
-                        return;
-                    }
+                    // error message was provided
+                    throw new Error(assertion.substr(2));
                 }
+                throw new Error("Invalid password");
+            }
+        }
 
-                // complete the login
-                this.addResponses("",
-                    `|/trn ${options.username},0,${assertion}`);
-                res();
-            };
-        });
+        // complete the login
+        this.loggedIn =
+            this.addResponses("", `|/trn ${options.username},0,${assertion}`);
     }
 
     /** Sets avatar id. */
@@ -171,7 +198,6 @@ export class PSBot
         this.addResponses("", `|/avatar ${avatar}`);
     }
 
-    /** Initializes websocket client. */
     private initClient(): void
     {
         this.client.on("connect", connection =>
@@ -198,100 +224,104 @@ export class PSBot
                 if (data.type === "utf8" && data.utf8Data)
                 {
                     this.logger.debug(`Received:\n${data.utf8Data}`);
-                    const {room, messages} = parsePSMessage(data.utf8Data,
-                        this.logger.addPrefix("Parser: "));
-                    // TODO: ensure promises resolve?
-                    return this.handleMessages(room, messages);
+                    this.parser.write(data.utf8Data);
                 }
             });
 
-            this.connected();
+            this.connectedRes();
         });
         this.client.on("connectFailed", err =>
         {
-            this.logger.error(`Failed to connect: ${err}`);
-            this.connected(err);
+            this.logger.error(`Failed to connect: ${err.stack ?? err}`);
+            this.connectedRes(err);
         });
     }
 
-    /** Handles parsed Messages received from the PS serer. */
-    private async handleMessages(room: string, messages: psmsg.Any[]):
-        Promise<void>
+    private updateUser(username: string): void
     {
-        for (const msg of messages) await this.handleMessage(room, msg);
+        this.username = username;
     }
 
-    /** Handles a parsed Message received from the PS serer. */
-    private async handleMessage(room: string, msg: psmsg.Any): Promise<void>
+    private respondToChallenge(user: string, format: string): void
     {
-        switch (msg.type)
+        if (this.formats.hasOwnProperty(format))
         {
-            case "challstr":
-                return this.challstr(msg.challstr);
-            case "init":
-            {
-                // room already initialized
-                if (this.rooms.hasOwnProperty(room) ||
-                    // or we don't need to bother with a non-battle room
-                    msg.roomType !== "battle")
-                {
-                    break;
-                }
+            this.addResponses("", `|/accept ${user}`);
+        }
+        else this.addResponses("", `|/reject ${user}`);
+    }
 
-                // joining a new battle
-                // room names follow the format battle-<format>-<id>
-                const format = room.split("-")[1];
+    private async parserReadLoop(): Promise<void>
+    {
+        for await (const msg of this.parser)
+        {
+            const pmsg = msg as ProtocolMsg;
+            await this.dispatch(pmsg);
+        }
+    }
+
+    /** Handles parsed protocol messages received from the PS serer. */
+    private async dispatch<T extends Protocol.ArgName>(
+        {roomid, args, kwArgs}: ProtocolMsg<T>): Promise<void>
+    {
+        if (!this.rooms.hasOwnProperty(roomid))
+        {
+            // first msg when joining a room must be |init|chat or |init|battle
+            if (args[0] === "init" && args[1] === "battle")
+            {
+                // battle rooms follow the naming format battle-<format>-<id>
+                const format = roomid.split("-")[1];
                 if (this.formats.hasOwnProperty(format))
                 {
-                    // lookup registered BattleAgent
                     if (!this.username)
                     {
-                        throw new Error("Username not initialized");
+                        this.logger.error("Could not join battle room " +
+                            `'${roomid}': Username not initialized`);
+                        return;
                     }
                     const sender = (...responses: string[]) =>
-                        this.addResponses(room, ...responses);
+                        this.addResponses(roomid, ...responses);
 
-                    this.rooms[room] =
-                        this.formats[format](room, this.username, sender);
+                    this.addHandler(roomid,
+                        this.formats[format](roomid, this.username, sender));
                 }
                 else
                 {
-                    this.logger.error(`Unsupported format ${format}`);
-                    this.addResponses(room, "|/leave");
+                    this.logger.error("Could not join battle room " +
+                        `'${roomid}': Format '${format}' not supported`);
+                    return;
                 }
-
-                break;
             }
-            case "updateChallenges":
-                for (const user in msg.challengesFrom)
-                {
-                    // istanbul ignore next: trivial for object key iteration
-                    if (!msg.challengesFrom.hasOwnProperty(user)) continue;
+            else
+            {
+                this.logger.error(`Could not join room '${roomid}': ` +
+                    "No handlers found");
+                return;
+            }
+        }
 
-                    if (this.formats.hasOwnProperty(msg.challengesFrom[user]))
-                    {
-                        this.addResponses("", `|/accept ${user}`);
-                    }
-                    else this.addResponses("", `|/reject ${user}`);
-                }
-                break;
-            case "updateUser":
-                this.username = msg.username;
-                break;
+        const handler = this.rooms[roomid];
+        const key = Protocol.key(args);
+        if (key !== undefined && key in handler)
+        {
+            await (handler[key] as any)(args, kwArgs);
+        }
+    }
+
+    /** Handles a parsed Message received from the PS serer. */
+    /*private async handleMessage(room: string, msg: psAny): Promise<void>
+    {
+        switch (type)
+        {
             case "deinit":
                 // cleanup after leaving a room
                 delete this.rooms[room];
                 break;
-
-            // delegate battle-related messages to their appropriate PSBattle
-            case "battleInit":
-                if (!this.rooms.hasOwnProperty(room)) break;
-                return this.rooms[room].init(msg);
             case "battleProgress":
                 if (!this.rooms.hasOwnProperty(room)) break;
                 // leave respectfully if the battle ended
                 // TODO: make this into a registered callback
-                for (const event of msg.events)
+                for (const event of events)
                 {
                     if (event.type === "tie" || event.type === "win")
                     {
@@ -299,14 +329,8 @@ export class PSBot
                     }
                 }
                 return this.rooms[room].progress(msg);
-            case "request":
-                if (!this.rooms.hasOwnProperty(room)) break;
-                return this.rooms[room].request(msg);
-            case "error":
-                if (!this.rooms.hasOwnProperty(room)) break;
-                return this.rooms[room].error(msg);
         }
-    }
+    }*/
 
     /**
      * Sends a list of responses to the server.

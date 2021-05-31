@@ -2,7 +2,7 @@ import { Choice, choiceIds } from "../../../battle/agent/Choice";
 import { BattleParser, BattleParserConfig } from
     "../../../battle/parser/BattleParser";
 import { BattleState, ReadonlyBattleState } from
-    "../../../battle/state/BattleState";
+    "../../../psbot/handlers/battle/formats/gen4/state/BattleState";
 import { Experience, ExperienceAgent, ExperienceAgentData } from "./Experience";
 
 /**

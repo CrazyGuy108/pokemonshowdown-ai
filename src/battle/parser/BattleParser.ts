@@ -1,29 +1,64 @@
 import { Logger } from "../../Logger";
 import { BattleAgent } from "../agent/BattleAgent";
 import { Choice } from "../agent/Choice";
-import { BattleState, ReadonlyBattleState } from "../state/BattleState";
-import * as events from "./BattleEvent";
 
-/** Config for `startBattleParser()`. */
-export type StartBattleParserArgs = Omit<BattleParserConfig, "iter">;
+/**
+ * Config for `startBattleParser()`.
+ * @template TState Battle state type.
+ * @template TRState Readonly battle state type.
+ * @template TAgent Battle agent type.
+ */
+export interface StartBattleParserArgs
+<
+    TState extends TRState,
+    TRState,
+    TAgent extends BattleAgent<TRState> = BattleAgent<TRState>,
+>
+    extends Omit<BattleParserContext<any, any, any, TAgent>, "iter" | "state">
+{
+    /**
+     * Gets the battle state tracker object that will be used in the
+     * BattleParser. Only called once.
+     */
+    getState(): TState;
+}
 
 /**
  * Initializes a BattleParser.
+ * @template TEvent Game event type.
+ * @template TState Battle state type.
+ * @template TArgs Additional parameter types.
+ * @template TResult Result type.
+ * @template TAgent Battle agent type.
  * @param cfg Config and dependencies for the BattleParser.
- * @param parser BattleParser to use.
- * @returns An iterator for sending BattleEvents to the BattleParser, as well as
- * a Promise that resolves when the battle is over with the final battle state.
+ * @param parser BattleParser function to call.
+ * @returns An iterator for sending TEvents to the BattleParser, as well as a
+ * Promise that resolves when the BattleParser returns or throws.
  */
-export function startBattleParser(cfg: StartBattleParserArgs,
-    parser: BattleParser): {iter: BattleIterator, finish: Promise<BattleState>}
+export function startBattleParser
+<
+    TEvent,
+    TState extends TRState,
+    TRState,
+    TArgs extends any[] = any[],
+    TResult extends BattleParserResult = BattleParserResult,
+    TAgent extends BattleAgent<TRState> = BattleAgent<TRState>
+>(
+    cfg: StartBattleParserArgs<TState, TRState, TAgent>,
+    parser: BattleParser<TEvent, TState, TRState, TAgent, TArgs, TResult>,
+    ...args: TArgs): {iter: BattleIterator<TEvent>, finish: Promise<TResult>}
 {
-    const {eventIt, battleIt} = createBattleEventIterators();
+    const {eventIt, battleIt} = createEventIteratorPair<TEvent>();
+    const ctx: BattleParserContext<TEvent, TState, TRState, TAgent> =
+    {
+        agent: cfg.agent, iter: eventIt, logger: cfg.logger, sender: cfg.sender,
+        state: cfg.getState()
+    };
     const finish = (async function asyncBattleParserCtx()
     {
         try
         {
-            const result = await parser({...cfg, iter: eventIt});
-            // once the parser finishes, terminate both iterators
+            const result = await parser(ctx, ...args);
             await eventIt.return();
             await battleIt.return();
             return result;
@@ -62,115 +97,115 @@ export type SenderResult = void | undefined | null | boolean | "disabled" |
     "trapped";
 
 /**
- * Main entry point parser type for handling events.
- * @param cfg Parser options and dependencies.
- * @returns A Promise that resolves when the battle is over, returning the final
- * battle state after handling all the events.
+ * Function type for parsing battle events.
+ * @template TEvent Game event type.
+ * @template TState Battle state type.
+ * @template TRState Readonly battle state type.
+ * @template TAgent Battle agent type.
+ * @template TArgs Additional parameter types.
+ * @template TResult Result type.
+ * @param ctx General args.
+ * @param args Additional args.
+ * @returns A custom result value to be handled by the caller.
  */
-export type BattleParser<TAgent extends BattleAgent = BattleAgent> =
-    (cfg: BattleParserConfig<TAgent>) => Promise<BattleState>;
+export type BattleParser
+<
+    TEvent,
+    TState extends TRState,
+    TRState,
+    TAgent extends BattleAgent<TRState> = BattleAgent<TRState>,
+    TArgs extends any[] = any[],
+    TResult extends BattleParserResult = BattleParserResult
+> =
+    (ctx: BattleParserContext<TEvent, TState, TRState, TAgent>,
+        ...args: TArgs) => Promise<TResult>
 
-/** Arguments for BattleParser dependencies. */
-export interface BattleParserConfig<TAgent extends BattleAgent = BattleAgent>
+/**
+ * Context container needed to call a BattleParser.
+ * @template TEvent Game event type.
+ * @template TState Battle state type.
+ * @template TRState Readonly battle state type.
+ * @template TAgent Battle agent type.
+ */
+export interface BattleParserContext
+<
+    TEvent,
+    TState extends TRState,
+    TRState,
+    TAgent extends BattleAgent<TRState> = BattleAgent<TRState>
+>
 {
     /** Function that makes the decisions for this battle. */
     readonly agent: TAgent;
-    /**
-     * Iterator for getting the next event and logging the latest BattleState.
-     */
-    readonly iter: EventIterator;
+    /** Iterator for getting the next event.  */
+    readonly iter: EventIterator<TEvent>;
     /** Logger object. */
     readonly logger: Logger;
     /** Function for sending the BattleAgent's Choice to the game. */
     readonly sender: ChoiceSender;
+    /** Battle state tracker. */
+    readonly state: TState;
 }
 
-/**
- * Sub-parser type used in BattleParser sub-compositions. Essentially represents
- * a parser production in a recursive-descent parser.
- * @template TResult Extend returned SubParserResult.
- * @template TArgs Additional argument types.
- * @param cfg Parser options and dependencies.
- * @param args Additional arguments.
- */
-export type SubParser<TResult extends SubParserResult = SubParserResult,
-        TArgs extends any[] = any[]> =
-    (cfg: SubParserConfig, ...args: TArgs) => Promise<TResult>;
-
-/** Arguments for SubParser dependencies. */
-export interface SubParserConfig extends BattleParserConfig
-{
-    /** Current battle state. */
-    readonly state: BattleState;
-}
-
-/** Return type of a SubParser. */
-export interface SubParserResult
-{
-    /**
-     * Whether a permanent halt event was detected or that no more events can be
-     * received.
-     */
-    permHalt?: true;
-}
+/** Extendable BattleParser return type interface. */
+export interface BattleParserResult {}
 
 /**
  * Iterator for retreiving the next event. Also takes the latest BattleState for
  * logging.
  */
-export interface EventIterator extends
-    PeekableAsyncIterator<events.Any, void, ReadonlyBattleState>
+export interface EventIterator<TEvent> extends
+    PeekableAsyncIterator<TEvent, void, void>
 {
     /**
      * Gets the next event.
-     * @param state Current BattleState for logging.
      * @override
      */
-    next(state: ReadonlyBattleState): Promise<IteratorResult<events.Any, void>>;
+    next(): Promise<IteratorResult<TEvent, void>>;
     /**
      * Peeks at the next event.
      * @override
      */
-    peek(): Promise<IteratorResult<events.Any, void>>;
+    peek(): Promise<IteratorResult<TEvent, void>>;
     /**
      * Finishes the iterator. If this is connected to a BattleIterator, the
      * `#return()` call will be propagated to it.
      * @override
      */
-    return(): Promise<IteratorResult<events.Any, void>>;
+    return(): Promise<IteratorResult<TEvent, void>>;
     /**
      * Finishes the iterator with an error, causing any pending
      * `#next()`/`#peek()` Promises to reject. If this is connected to a
      * BattleIterator, the `#throw()` call will be propagated to it.
      * @override
      */
-    throw(e?: any): Promise<IteratorResult<events.Any, void>>;
+    throw(e?: any): Promise<IteratorResult<TEvent, void>>;
 }
 
 /**
  * Iterator for sending the next event to the BattleParser. Also outputs the
  * latest BattleState for logging.
  */
-export interface BattleIterator extends
-    AsyncIterator<ReadonlyBattleState, void, events.Any>
+export interface BattleIterator<TEvent> extends
+    AsyncIterator<void, void, TEvent>
 {
     /**
      * Sends the next event. Once consumed, the latest BattleState is returned.
      * @override
      */
-    next(event: events.Any): Promise<IteratorResult<ReadonlyBattleState, void>>;
+    next(event: TEvent): Promise<IteratorResult<void, void>>;
     /**
      * Finishes the iterator. If this is connected to an EventIterator, the
      * `#return()` call will be propagated to it.
      * @override
      */
-    return(): Promise<IteratorResult<ReadonlyBattleState, void>>;
+    return(): Promise<IteratorResult<void, void>>;
     /**
      * Finishes the iterator with an error. If this is connected to an
      * EventIterator, the `#throw()` call will be propagated to it.
      * @override
      */
-    throw(e?: any): Promise<IteratorResult<ReadonlyBattleState, void>>;
+    throw(e?: any): Promise<IteratorResult<void, void>>;
 }
 
 /**
@@ -182,22 +217,22 @@ export interface BattleIterator extends
  * @returns An EventIterator for the BattleParser and a corresponding
  * BattleIterator for the game/sim parser.
  */
-function createBattleEventIterators():
-    {eventIt: EventIterator, battleIt: BattleIterator}
+function createEventIteratorPair<TEvent>():
+    {eventIt: EventIterator<TEvent>, battleIt: BattleIterator<TEvent>}
 {
     let error: Error | undefined;
 
     // TODO: could implement this more easily by using duplex/transform streams?
-    let nextEventPromise: Promise<events.Any | undefined> | null = null;
-    let nextEventRes: ((event?: events.Any) => void) | null = null;
+    let nextEventPromise: Promise<TEvent | undefined> | null = null;
+    let nextEventRes: ((event?: TEvent) => void) | null = null;
     let nextEventRej: ((reason?: any) => void) | null = null;
-    const eventIt: EventIterator =
+    const eventIt: EventIterator<TEvent> =
     {
-        async next(state)
+        async next()
         {
             // give back the new battlestate after handling the last event
-            if (battleRes) battleRes(state);
-            else battlePromise = Promise.resolve(state);
+            if (battleRes) battleRes();
+            else battlePromise = Promise.resolve();
 
             // wait for a response or consume the cached response
             nextEventPromise ??= new Promise(
@@ -253,10 +288,11 @@ function createBattleEventIterators():
         }
     };
 
-    let battlePromise: Promise<ReadonlyBattleState | undefined> | null = null;
-    let battleRes: ((state?: ReadonlyBattleState) => void) | null = null;
+    let battlePromise: Promise<boolean | void> | null = null;
+    let battleRes: ((ret?: boolean | PromiseLike<boolean>) => void) | null =
+        null;
     let battleRej: ((reason?: any) => void) | null = null;
-    const battleIt: BattleIterator =
+    const battleIt: BattleIterator<TEvent> =
     {
         async next(event)
         {
@@ -268,11 +304,10 @@ function createBattleEventIterators():
             battlePromise ??= new Promise(
                     (res, rej) => [battleRes, battleRej] = [res, rej]);
             if (error) battleRej!(error);
-            const state = await battlePromise
+            const ret = await battlePromise
                 .finally(() => battlePromise = battleRes = battleRej = null);
 
-            if (!state) return {value: undefined, done: true};
-            return {value: state};
+            return {value: undefined, done: !!ret};
         },
         async return()
         {
@@ -281,7 +316,7 @@ function createBattleEventIterators():
                 async () => ({value: undefined, done: true});
 
             // resolve any pending battleIt.next() calls
-            battleRes?.();
+            battleRes?.(/*ret*/ true);
 
             // make sure the corresponding iterator doesn't hang
             await eventIt.return();

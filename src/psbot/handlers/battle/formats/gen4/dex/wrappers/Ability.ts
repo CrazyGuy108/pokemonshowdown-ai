@@ -1,11 +1,11 @@
-import { SubParserConfig } from "../../parser/BattleParser";
-import { AbilityResult } from "../../parser/gen4/activateAbility";
-import { dispatch, handlers as base } from "../../parser/gen4/base";
-import { SubReason } from "../../parser/gen4/EventInference";
+import { SubParserConfig } from "../../../../../../../battle/parser/BattleParser";
+import { AbilityResult } from "../../parser/activateAbility";
+import { dispatch, handlers as base } from "../../parser/base";
+import { SubReason } from "../../parser/EventInference";
 import { chanceReason, diffMoveType, moveIsType, opponentHasItem } from
-    "../../parser/gen4/helpers";
-import * as parsers from "../../parser/gen4/parsers";
-import { consume, hasStatus, tryPeek, verify } from "../../parser/helpers";
+    "../../parser/helpers";
+import * as parsers from "../../parser/parsers";
+import { consume, hasStatus, tryPeek, verify } from "../../../../../../../battle/parser/helpers";
 import { Pokemon, ReadonlyPokemon } from "../../state/Pokemon";
 import { otherSide, Side } from "../../state/Side";
 import * as dex from "../dex";

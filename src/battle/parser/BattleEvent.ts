@@ -1,7 +1,7 @@
-import * as dex from "../dex/dex";
-import * as dexutil from "../dex/dex-util";
-import { MoveData } from "../state/Pokemon";
-import { Side } from "../state/Side";
+import * as dex from "../../psbot/handlers/battle/formats/gen4/dex/dex";
+import * as dexutil from "../../psbot/handlers/battle/formats/gen4/dex/dex-util";
+import { MoveData } from "../../psbot/handlers/battle/formats/gen4/state/Pokemon";
+import { Side } from "../../psbot/handlers/battle/formats/gen4/state/Side";
 
 /**
  * Defines the type maps for each Event. Key must match the Event's `#type`

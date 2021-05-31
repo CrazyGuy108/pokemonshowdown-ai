@@ -12,7 +12,9 @@ type BattleInitContext =
     teamSizes?: Partial<Writable<psmsg.BattleInit["teamSizes"]>>;
 };
 
-type MessageHandlerContext = BattleInitContext;
+type BattleProgressContext = psmsg.BattleProgress;
+
+type MessageHandlerContext = BattleInitContext | BattleProgressContext;
 
 export class MessageHandler extends BaseHandler<psmsg.Any>
 {
@@ -31,8 +33,14 @@ export class MessageHandler extends BaseHandler<psmsg.Any>
                     return event;
                 }
                 break;
+            case "battleProgress":
+            {
+                const event: psmsg.BattleProgress = ctx;
+                this.context = null;
+                return event;
+            }
         }
-        return null;
+        return this.context = null;
     }
 
     private static validateBattleInit(ctx: BattleInitContext):

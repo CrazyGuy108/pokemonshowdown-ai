@@ -1,28 +1,28 @@
 /** @file Formats BattleState objects into data usable by the neural network. */
 import { Buffer} from "buffer";
-import * as dex from "../../battle/dex/dex";
+import * as dex from "../../psbot/handlers/battle/formats/gen4/dex/dex";
 import { boostKeys, hpTypeKeys, majorStatuses, majorStatusKeys, rolloutKeys,
-    statKeys, Type, typeKeys, weatherKeys } from "../../battle/dex/dex-util";
-import { ReadonlyBattleState } from "../../battle/state/BattleState";
-import { ReadonlyHP } from "../../battle/state/HP";
-import { ReadonlyItemTempStatus } from "../../battle/state/ItemTempStatus";
+    statKeys, Type, typeKeys, weatherKeys } from "../../psbot/handlers/battle/formats/gen4/dex/dex-util";
+import { ReadonlyBattleState } from "../../psbot/handlers/battle/formats/gen4/state/BattleState";
+import { ReadonlyHP } from "../../psbot/handlers/battle/formats/gen4/state/HP";
+import { ReadonlyItemTempStatus } from "../../psbot/handlers/battle/formats/gen4/state/ItemTempStatus";
 import { ReadonlyMajorStatusCounter } from
-    "../../battle/state/MajorStatusCounter";
-import { ReadonlyMove } from "../../battle/state/Move";
-import { Moveset, ReadonlyMoveset } from "../../battle/state/Moveset";
-import { ReadonlyPokemon } from "../../battle/state/Pokemon";
-import { ReadonlyPokemonTraits } from "../../battle/state/PokemonTraits";
-import { ReadonlyPossibilityClass } from "../../battle/state/PossibilityClass";
-import { ReadonlyRoomStatus } from "../../battle/state/RoomStatus";
-import { ReadonlyStatRange, StatRange } from "../../battle/state/StatRange";
-import { ReadonlyStatTable } from "../../battle/state/StatTable";
-import { ReadonlyTeam, Team } from "../../battle/state/Team";
-import { ReadonlyTeamStatus } from "../../battle/state/TeamStatus";
-import { ReadonlyTempStatus } from "../../battle/state/TempStatus";
+    "../../psbot/handlers/battle/formats/gen4/state/MajorStatusCounter";
+import { ReadonlyMove } from "../../psbot/handlers/battle/formats/gen4/state/Move";
+import { Moveset, ReadonlyMoveset } from "../../psbot/handlers/battle/formats/gen4/state/Moveset";
+import { ReadonlyPokemon } from "../../psbot/handlers/battle/formats/gen4/state/Pokemon";
+import { ReadonlyPokemonTraits } from "../../psbot/handlers/battle/formats/gen4/state/PokemonTraits";
+import { ReadonlyPossibilityClass } from "../../psbot/handlers/battle/formats/gen4/state/PossibilityClass";
+import { ReadonlyRoomStatus } from "../../psbot/handlers/battle/formats/gen4/state/RoomStatus";
+import { ReadonlyStatRange, StatRange } from "../../psbot/handlers/battle/formats/gen4/state/StatRange";
+import { ReadonlyStatTable } from "../../psbot/handlers/battle/formats/gen4/state/StatTable";
+import { ReadonlyTeam, Team } from "../../psbot/handlers/battle/formats/gen4/state/Team";
+import { ReadonlyTeamStatus } from "../../psbot/handlers/battle/formats/gen4/state/TeamStatus";
+import { ReadonlyTempStatus } from "../../psbot/handlers/battle/formats/gen4/state/TempStatus";
 import { ReadonlyVariableTempStatus } from
-    "../../battle/state/VariableTempStatus";
+    "../../psbot/handlers/battle/formats/gen4/state/VariableTempStatus";
 import { ReadonlyMoveStatus, ReadonlyVolatileStatus } from
-    "../../battle/state/VolatileStatus";
+    "../../psbot/handlers/battle/formats/gen4/state/VolatileStatus";
 import { assertEncoder, augment, concat, Encoder, map, nullable, optional } from
     "./Encoder";
 import { booleanEncoder, checkLength, fillEncoder, limitedStatusTurns,

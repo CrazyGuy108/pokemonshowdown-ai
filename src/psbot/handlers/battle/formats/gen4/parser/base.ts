@@ -1,8 +1,8 @@
-import * as dexutil from "../../dex/dex-util";
-import { Pokemon } from "../../state/Pokemon";
-import { otherSide, Side } from "../../state/Side";
-import { SubParserConfig, SubParserResult } from "../BattleParser";
-import { consume, createDispatcher, verify } from "../helpers";
+import * as dexutil from "../dex/dex-util";
+import { Pokemon } from "../state/Pokemon";
+import { otherSide, Side } from "../state/Side";
+import { SubParserConfig, SubParserResult } from "../../../../../../battle/parser/BattleParser";
+import { consume, createDispatcher, verify } from "../../../../../../battle/parser/helpers";
 import { activateAbility } from "./activateAbility";
 import { activateItem } from "./activateItem";
 import { halt } from "./halt";

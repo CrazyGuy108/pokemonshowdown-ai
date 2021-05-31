@@ -1,7 +1,7 @@
-import * as dex from "../battle/dex/dex";
-import * as dexutil from "../battle/dex/dex-util";
+import * as dex from "./handlers/battle/formats/gen4/dex/dex";
+import * as dexutil from "./handlers/battle/formats/gen4/dex/dex-util";
 import * as events from "../battle/parser/BattleEvent";
-import { otherSide, Side } from "../battle/state/Side";
+import { otherSide, Side } from "./handlers/battle/formats/gen4/state/Side";
 import { Logger } from "../Logger";
 import { isPlayerID, otherPlayerID, PlayerID, PokemonID, toIdName } from
     "./helpers";

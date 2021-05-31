@@ -1,5 +1,5 @@
-import { SubParser, SubParserConfig, SubParserResult } from "../BattleParser";
-import { eventLoop, peek, tryPeek } from "../helpers";
+import { SubParser, SubParserConfig, SubParserResult } from "../../../../../../battle/parser/BattleParser";
+import { eventLoop, peek, tryPeek } from "../../../../../../battle/parser/helpers";
 
 // TODO: make this a class?
 /**

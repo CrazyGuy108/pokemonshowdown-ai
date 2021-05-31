@@ -1,13 +1,13 @@
-import { SubParserConfig, SubParserResult } from "../../parser/BattleParser";
-import { ItemResult } from "../../parser/gen4/activateItem";
-import { handlers as base } from "../../parser/gen4/base";
-import { SubReason } from "../../parser/gen4/EventInference";
+import { SubParserConfig, SubParserResult } from "../../../../../../../battle/parser/BattleParser";
+import { ItemResult } from "../../parser/activateItem";
+import { handlers as base } from "../../parser/base";
+import { SubReason } from "../../parser/EventInference";
 import { cantHaveKlutz, checkKlutz, hasAbility, isAt1HP, moveIsType } from
-    "../../parser/gen4/helpers";
-import * as parsers from "../../parser/gen4/parsers";
-import { ItemConsumeResult } from "../../parser/gen4/removeItem";
-import { consume, hasStatus, matchPercentDamage, tryPeek, verify } from
     "../../parser/helpers";
+import * as parsers from "../../parser/parsers";
+import { ItemConsumeResult } from "../../parser/removeItem";
+import { consume, hasStatus, matchPercentDamage, tryPeek, verify } from
+    "../../../../../../../battle/parser/helpers";
 import { Pokemon } from "../../state/Pokemon";
 import { Side } from "../../state/Side";
 import * as dexutil from "../dex-util";

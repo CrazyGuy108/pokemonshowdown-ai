@@ -1,76 +1,7 @@
-import * as dexutil from "../dex/dex-util";
-import { BattleState } from "../state/BattleState";
-import { ReadonlyPokemon } from "../state/Pokemon";
+import { BattleState } from "../../psbot/handlers/battle/formats/gen4/state/BattleState";
 import * as events from "./BattleEvent";
 import { BattleParser, BattleParserConfig, SubParser, SubParserConfig,
     SubParserResult } from "./BattleParser";
-
-// TODO: move hasStatus/matchBoost/matchPercentDamage to a separate file
-
-/** Checks whether the pokemon has the given status. */
-export function hasStatus(mon: ReadonlyPokemon, statusType: dexutil.StatusType):
-    boolean
-{
-    switch (statusType)
-    {
-        case "aquaRing": case "attract": case "curse": case "flashFire":
-        case "focusEnergy": case "imprison": case "ingrain":
-        case "leechSeed": case "mudSport": case "nightmare":
-        case "powerTrick": case "substitute": case "suppressAbility":
-        case "torment": case "waterSport":
-        case "destinyBond": case "grudge": case "rage": // singlemove
-        case "magicCoat": case "roost": case "snatch": // singleturn
-            return mon.volatile[statusType];
-        case "bide": case "confusion": case "charge": case "magnetRise":
-        case "embargo": case "healBlock": case "slowStart": case "taunt":
-        case "uproar": case "yawn":
-            return mon.volatile[statusType].isActive;
-        case "encore":
-            return mon.volatile[statusType].ts.isActive;
-        case "endure": case "protect": // stall
-            return mon.volatile.stalling;
-        case "foresight": case "miracleEye":
-            return mon.volatile.identified === statusType;
-        default:
-            if (dexutil.isMajorStatus(statusType))
-            {
-                return mon.majorStatus.current === statusType;
-            }
-            // istanbul ignore next: should never happen
-            throw new Error(`Invalid status effect '${statusType}'`);
-    }
-}
-
-/**
- * Checks if the boost amounts are suitable.
- * @param set Whether the boost is being set (`true`) or added (`false`).
- * @param pending Pending boost amount.
- * @param given Given boost amount from game events.
- * @param current Pokemon's current boost amount if adding (`set`=false).
- */
-export function matchBoost(set: boolean, pending: number, given: number,
-    current?: number): boolean
-{
-    if (set) return current == null && pending === given;
-    if (current == null) return false;
-
-    const next = Math.max(-6, Math.min(given + current, 6));
-    const expected = Math.max(-6, Math.min(pending + current, 6));
-    return next === expected;
-}
-
-/**
- * Checks whether a percent-damage effect would be silent.
- * @param percent Percent damage.
- * @param hp Current hp.
- * @param hpMax Max hp.
- */
-export function matchPercentDamage(percent: number, hp: number, hpMax: number):
-    boolean
-{
-    // can't heal when full or damage when fainted
-    return (percent > 0 && hp >= hpMax) || (percent < 0 && hp <= 0);
-}
 
 /** Maps BattleEvent type to a SubParser handler. */
 export type EventHandlerMap<TResult extends SubParserResult = SubParserResult> =

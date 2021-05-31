@@ -1,8 +1,8 @@
-import { Choice } from "../../agent/Choice";
-import { ReadonlyBattleState } from "../../state/BattleState";
+import { Choice } from "../../../../../../battle/agent/Choice";
+import { ReadonlyBattleState } from "../state/BattleState";
 import { SenderResult, SubParserConfig, SubParserResult } from
-    "../BattleParser";
-import { consume, verify } from "../helpers";
+    "../../../../../../battle/parser/BattleParser";
+import { consume, verify } from "../../../../../../battle/parser/helpers";
 
 /**
  * Handles a halt event. If the event requests a decision from the BattleAgent,

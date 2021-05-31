@@ -1,9 +1,9 @@
 /** @file Factored out code between `activateItem.ts` and `removeItem.ts`. */
 // TODO: combine the two above mentioned files?
-import * as dex from "../../dex/dex";
-import { Pokemon } from "../../state/Pokemon";
-import { Side } from "../../state/Side";
-import { SubParserConfig } from "../BattleParser";
+import * as dex from "../dex/dex";
+import { Pokemon } from "../state/Pokemon";
+import { Side } from "../state/Side";
+import { SubParserConfig } from "../../../../../../battle/parser/BattleParser";
 import { SubInference, SubReason } from "./EventInference";
 import { hasItem } from "./helpers";
 

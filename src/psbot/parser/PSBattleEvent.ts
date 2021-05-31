@@ -1,5 +1,5 @@
 /** @file Interfaces and helper functions for handling Events. */
-import { BoostName, MajorStatus, WeatherType } from "../../battle/dex/dex-util";
+import { BoostName, MajorStatus, WeatherType } from "../handlers/battle/formats/gen4/dex/dex-util";
 import { SwitchOptions } from "../../battle/parser/BattleEvent";
 import { PlayerID, PokemonDetails, PokemonID, PokemonStatus } from "../helpers";
 

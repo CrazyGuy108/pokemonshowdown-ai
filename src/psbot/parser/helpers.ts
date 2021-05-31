@@ -1,6 +1,6 @@
 /** @file Provides helper parsers/functions for the main parser. */
 import { BoostName, isBoostName, isMajorStatus, isWeatherType, MajorStatus,
-    WeatherType } from "../../battle/dex/dex-util";
+    WeatherType } from "../handlers/battle/formats/gen4/dex/dex-util";
 import { isPlayerID, PlayerID, PokemonDetails, PokemonID, PokemonStatus } from
     "../helpers";
 import { transform } from "./combinators";

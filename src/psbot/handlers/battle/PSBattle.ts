@@ -1,25 +1,54 @@
 import { inspect } from "util";
-import { BattleAgent } from "../battle/agent/BattleAgent";
-import { HaltReason } from "../battle/parser/BattleEvent";
-import { BattleIterator, SenderResult, startBattleParser } from
-    "../battle/parser/BattleParser";
-import * as parsers from "../battle/parser/parsers";
-import { BattleState } from "../battle/state/BattleState";
-import { Logger } from "../Logger";
-import * as psmsg from "./parser/PSMessage";
-import { Sender } from "./PSBot";
-import { PSEventHandler } from "./PSEventHandler";
-import { RoomHandler } from "./RoomHandler";
+import { BattleAgent } from "../../../battle/agent/BattleAgent";
+import { HaltReason } from "../../../battle/parser/BattleEvent";
+import { BattleIterator, BattleParser, SenderResult, startBattleParser } from
+    "../../../battle/parser/BattleParser";
+import { Logger } from "../../../Logger";
+import * as psmsg from "../../parser/PSMessage";
+import { Sender } from "../../PSBot";
+import { RoomHandler } from "../RoomHandler";
+import * as formats from "./formats";
+import type { Event } from "./PSEvent";
 
-/** Translates server messages to PSEventHandler calls. */
-export class PSBattle implements RoomHandler
+/**
+ * Options for initializing a PSBattle.
+ * @template TFormatType Format/gen for this game.
+ */
+export interface PSBattleOptions<
+    TFormatType extends formats.FormatType = formats.FormatType>
 {
-    /** Iterator for sending BattleEvents to the BattleParser. */
-    protected readonly iter: BattleIterator;
-    /** Translates game events to sim-agnostic BattleEvents. */
-    protected readonly eventHandler: PSEventHandler;
+    /** Client's username. */
+    readonly username: string;
+    /** Function that makes decisions for this battle. */
+    readonly agent: BattleAgent<formats.ReadonlyState<TFormatType>>
+    /** Used to send messages to the server about the client's response. */
+    readonly sender: Sender;
+    /** Logger object. */
+    readonly logger: Logger;
+    /** Game event handler. */
+    readonly parser: BattleParser<
+        Event, formats.State<TFormatType>, formats.ReadonlyState<TFormatType>>;
+}
+
+/**
+ * Manages the client's side of a battle in a PS room.
+ * @template TFormatType Format/gen for this game.
+ */
+export class PSBattle<
+    TFormatType extends formats.FormatType = formats.FormatType>
+    implements RoomHandler
+{
+    /** Client's username. */
+    private readonly username: string;
+    /** Used to send messages to the server about the client's response. */
+    private readonly sender: Sender;
+    /** Logger object. */
+    private readonly logger: Logger;
+
+    /** Iterator for sending PS Events to the BattleParser. */
+    private readonly iter: BattleIterator<Event>;
     /** Pending Request message to process into an UpdateMoves event. */
-    protected lastRequest: psmsg.Request | null = null;
+    private lastRequest: psmsg.Request | null = null;
 
     /**
      * If the last unhandled `|error|` message indicated an unavailable
@@ -32,46 +61,51 @@ export class PSBattle implements RoomHandler
     private parserSendCallback: null | ((result?: SenderResult) => void) = null;
 
     /** Promise for the BattleParser to finish handling a `halt` event. */
-    private haltPromise: ReturnType<BattleIterator["next"]> | null = null;
+    private haltPromise: Promise<IteratorResult<any, any>> | null = null;
     /** Promise for the entire BattleParser to finish. */
-    private readonly finishPromise: Promise<BattleState>;
+    private readonly finishPromise: Promise<any>;
 
     /**
      * Creates a PSBattle.
-     * @param username Client's username.
-     * @param agent Makes the decisions for this battle.
-     * @param sender Used to send messages to the server.
-     * @param logger Logger object.
-     * @param parser BattleEvent handler.
-     * @param eventHandlerCtor The type of PSEventHandler to use.
+     * @param formatType Format/gen for this game.
+     * @param opts Initialization options.
+     * @see PSBattleOptions
      */
-    constructor(protected readonly username: string, agent: BattleAgent,
-        private readonly sender: Sender, protected readonly logger: Logger,
-        parser = parsers.gen4, eventHandlerCtor = PSEventHandler)
+    constructor(public readonly formatType: TFormatType,
+        opts: PSBattleOptions<TFormatType>)
     {
-        const {iter, finish} = startBattleParser(
+        this.username = opts.username;
+        this.sender = opts.sender;
+        this.logger = opts.logger;
+
+        const {iter, finish} =
+            startBattleParser
+            <
+                Event, formats.State<TFormatType>,
+                formats.ReadonlyState<TFormatType>
+            >(
             {
-                agent, logger: logger.addPrefix("BattleParser: "),
+                agent: opts.agent,
+                logger: opts.logger.addPrefix("BattleParser: "),
+                getState: () => new formats.state[formatType](),
                 sender: choice =>
                     new Promise<SenderResult>(res =>
                     {
                         this.parserSendCallback = res;
                         if (!this.sender(`|/choose ${choice}`))
                         {
-                            logger.debug("Can't send Choice, force accept");
+                            opts.logger.debug(
+                                "Can't send Choice, force accept");
                             res();
                         }
                     })
                     .finally(() => this.parserSendCallback = null)
             },
-            parser);
+            opts.parser);
         this.iter = iter;
         this.finishPromise = finish;
         // suppress unhandled rejection warnings until #finish() is called
         finish.catch(() => {});
-
-        this.eventHandler = new eventHandlerCtor(this.username,
-            logger.addPrefix("PSEventHandler: "));
     }
 
     /** @override */

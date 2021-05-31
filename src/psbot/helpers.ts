@@ -1,5 +1,5 @@
 /** @file Contains useful helper types. */
-import { MajorStatus } from "../battle/dex/dex-util";
+import { MajorStatus } from "./handlers/battle/formats/gen4/dex/dex-util";
 
 /** Converts a display name into an id name. */
 export function toIdName(str: string): string

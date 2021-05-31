@@ -1,4 +1,4 @@
-import { SwitchOptions } from "../parser/BattleEvent";
+import { SwitchOptions } from "../../../../../../battle/parser/BattleEvent";
 import { BattleState, ReadonlyBattleState } from "./BattleState";
 import { Pokemon, ReadonlyPokemon } from "./Pokemon";
 import { Side } from "./Side";

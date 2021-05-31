@@ -1,6 +1,6 @@
-import * as dex from "../../dex/dex";
-import * as dexutil from "../../dex/dex-util";
-import { Pokemon } from "../../state/Pokemon";
+import * as dex from "../dex/dex";
+import * as dexutil from "../dex/dex-util";
+import { Pokemon } from "../state/Pokemon";
 import { SubReason } from "./EventInference";
 
 // TODO: make these into classes?
