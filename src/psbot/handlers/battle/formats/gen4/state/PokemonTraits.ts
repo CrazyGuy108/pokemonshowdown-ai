@@ -1,6 +1,4 @@
-import * as dex from "../dex/dex";
-import * as dexutil from "../dex/dex-util";
-import { PokemonData, Type } from "../dex/dex-util";
+import * as dex from "../dex";
 import { PossibilityClass, ReadonlyPossibilityClass } from "./PossibilityClass";
 import { ReadonlyStatTable, StatTable } from "./StatTable";
 
@@ -8,14 +6,14 @@ import { ReadonlyStatTable, StatTable } from "./StatTable";
 export interface ReadonlyPokemonTraits
 {
     /** Species data. */
-    readonly species: PokemonData;
+    readonly species: dex.PokemonData;
     // TODO: use dex.Ability wrappers instead of data
     /** Ability possibility. */
-    readonly ability: ReadonlyPossibilityClass<string, dexutil.AbilityData>;
+    readonly ability: ReadonlyPossibilityClass<string, dex.AbilityData>;
     /** Stat range possibilities. */
     readonly stats: ReadonlyStatTable;
     /** Primary and secondary types. */
-    readonly types: readonly [Type, Type];
+    readonly types: readonly [dex.Type, dex.Type];
 }
 
 /**
@@ -25,13 +23,13 @@ export interface ReadonlyPokemonTraits
 export class PokemonTraits implements ReadonlyPokemonTraits
 {
     /** @override */
-    public readonly species: dexutil.PokemonData;
+    public readonly species: dex.PokemonData;
     /** @override */
-    public readonly ability: PossibilityClass<string, dexutil.AbilityData>;
+    public readonly ability: PossibilityClass<string, dex.AbilityData>;
     /** @override */
     public readonly stats: StatTable;
     /** @override */
-    public readonly types: readonly [Type, Type];
+    public readonly types: readonly [dex.Type, dex.Type];
 
     /**
      * Creates a base PokemonTraits object. Used for initialization or form
@@ -39,8 +37,7 @@ export class PokemonTraits implements ReadonlyPokemonTraits
      * @param species Species data.
      * @param level Pokemon's level for stat calcs.
      */
-    public static base(species: dexutil.PokemonData, level: number):
-        PokemonTraits
+    public static base(species: dex.PokemonData, level: number): PokemonTraits
     {
         return new PokemonTraits(species, level);
     }
@@ -53,9 +50,9 @@ export class PokemonTraits implements ReadonlyPokemonTraits
      * @param stats Override stats.
      * @param types Override types.
      */
-    private constructor(species: dexutil.PokemonData, level: number,
-        ability?: PossibilityClass<string, dexutil.AbilityData>,
-        stats?: StatTable, types?: readonly [Type, Type])
+    private constructor(species: dex.PokemonData, level: number,
+        ability?: PossibilityClass<string, dex.AbilityData>, stats?: StatTable,
+        types?: readonly [dex.Type, dex.Type])
     {
         this.species = species;
         this.ability = ability ??
@@ -95,7 +92,7 @@ export class PokemonTraits implements ReadonlyPokemonTraits
     }
 
     /** Creates a partial shallow copy for type changes. */
-    public divergeTypes(types: readonly [Type, Type]): PokemonTraits
+    public divergeTypes(types: readonly [dex.Type, dex.Type]): PokemonTraits
     {
         return new PokemonTraits(this.species, this.stats.level!, this.ability,
             this.stats, types);

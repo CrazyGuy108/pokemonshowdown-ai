@@ -1,4 +1,4 @@
-import { weatherItems, WeatherType } from "../dex/dex-util";
+import { weatherItems, WeatherType } from "../dex";
 import { ItemTempStatus, ReadonlyItemTempStatus } from "./ItemTempStatus";
 import { ReadonlyTempStatus, TempStatus } from "./TempStatus";
 

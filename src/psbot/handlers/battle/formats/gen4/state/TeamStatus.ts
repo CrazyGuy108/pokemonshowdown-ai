@@ -1,5 +1,4 @@
-import { FutureMove, futureMoveKeys } from "../dex/dex";
-import { SelfSwitchType } from "../dex/dex-util";
+import { FutureMove, futureMoveKeys, SelfSwitchType } from "../dex";
 import { ItemTempStatus, ReadonlyItemTempStatus } from "./ItemTempStatus";
 import { ReadonlyTempStatus, TempStatus } from "./TempStatus";
 

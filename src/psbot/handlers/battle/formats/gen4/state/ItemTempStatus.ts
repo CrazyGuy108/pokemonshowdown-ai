@@ -1,4 +1,4 @@
-import { ItemData } from "../dex/dex-util";
+import { ItemData } from "../dex";
 import { Pokemon } from "./Pokemon";
 import { PossibilityClass, ReadonlyPossibilityClass } from "./PossibilityClass";
 import { pluralTurns } from "./utility";

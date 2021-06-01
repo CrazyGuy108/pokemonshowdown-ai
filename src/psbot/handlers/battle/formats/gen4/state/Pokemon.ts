@@ -1,5 +1,4 @@
-import * as dex from "../dex/dex";
-import * as dexutil from "../dex/dex-util";
+import * as dex from "../dex";
 import { HP, ReadonlyHP } from "./HP";
 import { MajorStatusCounter, ReadonlyMajorStatusCounter } from
     "./MajorStatusCounter";
@@ -39,13 +38,13 @@ export interface ReadonlyPokemon
     readonly species: string;
 
     /** Current types for this Pokemon. */
-    readonly types: readonly dexutil.Type[];
+    readonly types: readonly dex.Type[];
 
     // TODO: use dex.Item wrappers instead of data
     /** Current reference to held item possibilities. */
-    readonly item: ReadonlyPossibilityClass<string, dexutil.ItemData>;
+    readonly item: ReadonlyPossibilityClass<string, dex.ItemData>;
     /** Current reference to last consumed item possibilities. */
-    readonly lastItem: ReadonlyPossibilityClass<string, dexutil.ItemData>;
+    readonly lastItem: ReadonlyPossibilityClass<string, dex.ItemData>;
 
     /** Pokemon's current moveset. */
     readonly moveset: ReadonlyMoveset;
@@ -56,7 +55,7 @@ export interface ReadonlyPokemon
     readonly gender?: string | null;
 
     /** Current Hidden Power type possibility. */
-    readonly hpType: ReadonlyPossibilityClass<dexutil.HPType>;
+    readonly hpType: ReadonlyPossibilityClass<dex.HPType>;
 
     /** Happiness value between 0 and 255, or null if unknown. */
     readonly happiness: number | null;
@@ -157,7 +156,7 @@ export class Pokemon implements ReadonlyPokemon
     }
 
     /** @override */
-    public get types(): readonly dexutil.Type[]
+    public get types(): readonly dex.Type[]
     {
         let result = [...this.traits.types];
         if (this._volatile) result.push(this._volatile.addedType);
@@ -170,10 +169,10 @@ export class Pokemon implements ReadonlyPokemon
     }
 
     /** @override */
-    public get item(): PossibilityClass<string, dexutil.ItemData>
+    public get item(): PossibilityClass<string, dex.ItemData>
     { return this._item; }
     /** @override */
-    public get lastItem(): PossibilityClass<string, dexutil.ItemData>
+    public get lastItem(): PossibilityClass<string, dex.ItemData>
     { return this._lastItem; }
     /**
      * Indicates that an item has been revealed or gained.
@@ -270,7 +269,7 @@ export class Pokemon implements ReadonlyPokemon
     public gender?: string | null;
 
     /** @override */
-    public get hpType(): PossibilityClass<dexutil.HPType>
+    public get hpType(): PossibilityClass<dex.HPType>
     {
         // TODO: gen>=5: always use baseTraits
         return this.traits.stats.hpType;
@@ -443,7 +442,7 @@ export class Pokemon implements ReadonlyPokemon
      * @param selfSwitch Self-switch status if any.
      */
     public switchInto(mon?: Pokemon | null,
-        selfSwitch?: dexutil.SelfSwitchType | null): void
+        selfSwitch?: dex.SelfSwitchType | null): void
     {
         // create our own volatile status object
         if (!mon?._volatile) this._volatile = new VolatileStatus();
@@ -534,7 +533,7 @@ export class Pokemon implements ReadonlyPokemon
         this.volatile.choiceLock = null;
 
         // copy boosts
-        for (const stat of dexutil.boostKeys)
+        for (const stat of dex.boostKeys)
         {
             this.volatile.boosts[stat] = target.volatile.boosts[stat];
         }

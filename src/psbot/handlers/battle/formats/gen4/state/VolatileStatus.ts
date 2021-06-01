@@ -1,6 +1,4 @@
-import { LockedMove, lockedMoves, TwoTurnMove, twoTurnMoves } from "../dex/dex";
-import { BoostName, BoostTable, MajorStatus, rolloutMoves, Type } from
-    "../dex/dex-util";
+import * as dex from "../dex";
 import { Moveset, ReadonlyMoveset } from "./Moveset";
 import { PokemonTraits, ReadonlyPokemonTraits } from "./PokemonTraits";
 import { ReadonlyTempStatus, TempStatus } from "./TempStatus";
@@ -38,7 +36,7 @@ export interface ReadonlyVolatileStatus
     /* Aqua Ring move status. */
     readonly aquaRing: boolean;
     /** Stat boost stages. */
-    readonly boosts: BoostTable<number>;
+    readonly boosts: dex.BoostTable<number>;
     /** Confusion status. */
     readonly confusion: ReadonlyTempStatus;
     /** Curse status. */
@@ -128,7 +126,7 @@ export interface ReadonlyVolatileStatus
      * can be implicitly ended, so this VariableTempStatus field is
      * silent-endable.
      */
-    readonly lockedMove: ReadonlyVariableTempStatus<LockedMove>;
+    readonly lockedMove: ReadonlyVariableTempStatus<dex.LockedMove>;
     /** Whether the pokemon has used Magic Coat during this turn. */
     readonly magicCoat: boolean;
     /** Micle Berry status. */
@@ -150,11 +148,11 @@ export interface ReadonlyVolatileStatus
     /** Override pokemon traits. Applies until switched out. */
     readonly overrideTraits: ReadonlyPokemonTraits | null;
     /** Temporary third type. */
-    readonly addedType: Type;
+    readonly addedType: dex.Type;
     /** Rage move status. */
     readonly rage: boolean;
     /** Rollout-like move status. */
-    readonly rollout: ReadonlyVariableTempStatus<keyof typeof rolloutMoves>;
+    readonly rollout: ReadonlyVariableTempStatus<keyof typeof dex.rolloutMoves>;
     /** Roost move effect (single turn). */
     readonly roost: boolean;
     /** First 5 turns of Slow Start ability. */
@@ -174,7 +172,7 @@ export interface ReadonlyVolatileStatus
     /** Transform move status. */
     readonly transformed: boolean;
     /** Two-turn move currently being prepared. */
-    readonly twoTurn: ReadonlyVariableTempStatus<TwoTurnMove>;
+    readonly twoTurn: ReadonlyVariableTempStatus<dex.TwoTurnMove>;
     /** Whether the Unburden ability would be active here. */
     readonly unburden: boolean;
     /** Uproar move status. */
@@ -201,8 +199,9 @@ export class VolatileStatus implements ReadonlyVolatileStatus
     public aquaRing!: boolean;
 
     /** @override */
-    public get boosts(): Writable<BoostTable<number>> { return this._boosts; }
-    private _boosts!: Writable<BoostTable<number>>;
+    public get boosts(): Writable<dex.BoostTable<number>>
+    { return this._boosts; }
+    private _boosts!: Writable<dex.BoostTable<number>>;
 
     // 2-5 move attempts, cure on last
     /** @override */
@@ -379,7 +378,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
     //  inactive
     // FIXME: ambiguity if there's no fatigue message to mark the end
     /** @override */
-    public readonly lockedMove = new VariableTempStatus(lockedMoves, 2,
+    public readonly lockedMove = new VariableTempStatus(dex.lockedMoves, 2,
         /*silent*/true);
 
     /** @override */
@@ -407,10 +406,10 @@ export class VolatileStatus implements ReadonlyVolatileStatus
     public overrideTraits!: PokemonTraits | null;
 
     /** @override */
-    public addedType!: Type;
+    public addedType!: dex.Type;
 
     /** Changes current type while active. Also resets `#addedType`. */
-    public changeTypes(types: readonly [Type, Type]): void
+    public changeTypes(types: readonly [dex.Type, dex.Type]): void
     {
         // istanbul ignore next: should never happen
         if (!this.overrideTraits)
@@ -426,7 +425,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
 
     // 5 move attempts (including start), end on last or if inactive
     /** @override */
-    public readonly rollout = new VariableTempStatus(rolloutMoves, 4,
+    public readonly rollout = new VariableTempStatus(dex.rolloutMoves, 4,
         /*silent*/true);
 
     /** @override */
@@ -474,7 +473,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
 
     // ends next turn
     /** @override */
-    public readonly twoTurn = new VariableTempStatus(twoTurnMoves, 2,
+    public readonly twoTurn = new VariableTempStatus(dex.twoTurnMoves, 2,
             /*silent*/true);
 
     /** @override */
@@ -621,7 +620,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
      * Applies some special effects that only happen when Baton Passing.
      * @param majorStatus Major status of the recipient.
      */
-    public batonPass(majorStatus?: MajorStatus): void
+    public batonPass(majorStatus?: dex.MajorStatus): void
     {
         // restart lockon so the recipient can use it
         if (this._lockOnTurns.isActive) this._lockOnTurns.start();
@@ -732,7 +731,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
     {
         return `[${([] as string[]).concat(
             this.aquaRing ? ["aqua ring"] : [],
-            (Object.keys(this._boosts) as BoostName[])
+            (Object.keys(this._boosts) as dex.BoostName[])
                 .filter(key => this._boosts[key] !== 0)
                 .map(key => `${key}: ${plus(this._boosts[key])}`),
             this.confusion.isActive ? [this.confusion.toString()] : [],

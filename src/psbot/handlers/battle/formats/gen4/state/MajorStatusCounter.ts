@@ -1,4 +1,4 @@
-import { MajorStatus } from "../dex/dex-util";
+import { MajorStatus } from "../dex";
 import { pluralTurns } from "./utility";
 
 /** Readonly MajorStatusCounter representation. */

@@ -1,4 +1,4 @@
-import * as dex from "../dex/dex";
+import * as dex from "../dex";
 import { Move, ReadonlyMove } from "./Move";
 
 export interface ReadonlyMoveset

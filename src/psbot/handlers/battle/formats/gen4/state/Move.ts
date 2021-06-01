@@ -1,5 +1,4 @@
-import * as dex from "../dex/dex";
-import { MoveData } from "../dex/dex-util";
+import * as dex from "../dex";
 
 /** Readonly Move representation. */
 export interface ReadonlyMove
@@ -8,7 +7,7 @@ export interface ReadonlyMove
     readonly name: string;
     // TODO: use dex.Move wrapper instead of data
     /** Move data. */
-    readonly data: MoveData;
+    readonly data: dex.MoveData;
     /** Amount of power points left on this move. */
     readonly pp: number;
     /** Max amount of power points this move can have. */
@@ -21,7 +20,7 @@ export class Move implements ReadonlyMove
     /** @override */
     public readonly name: string;
     /** @override */
-    public readonly data: MoveData;
+    public readonly data: dex.MoveData;
 
     /** @override */
     public get pp(): number { return this._pp; }
