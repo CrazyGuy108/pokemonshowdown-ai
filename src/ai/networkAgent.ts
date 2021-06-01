@@ -1,6 +1,5 @@
 import * as tf from "@tensorflow/tfjs";
-import { BattleAgent } from "../battle/agent/BattleAgent";
-import { intToChoice } from "../battle/agent/Choice";
+import { BattleAgent, intToChoice } from "../battle/agent";
 import { allocUnsafe, battleStateEncoder } from "./encoder/encoders";
 import { policyAgent, PolicyType } from "./policyAgent";
 

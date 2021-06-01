@@ -1,8 +1,7 @@
 import { MessagePort } from "worker_threads";
 import { alloc, battleStateEncoder } from "../../../ai/encoder/encoders";
 import { policyAgent, PolicyType } from "../../../ai/policyAgent";
-import { BattleAgent } from "../../../battle/agent/BattleAgent";
-import { intToChoice } from "../../../battle/agent/Choice";
+import { BattleAgent, intToChoice } from "../../../battle/agent";
 import { ExperienceAgentData } from "../../sim/helpers/Experience";
 import { AsyncPort, PortRequestBase, PortResultBase } from
     "./helpers/AsyncPort";

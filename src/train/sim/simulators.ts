@@ -1,4 +1,4 @@
-import { BattleAgent } from "../../battle/agent/BattleAgent";
+import { BattleAgent } from "../../battle/agent";
 import * as parsers from "../../battle/parser/parsers";
 import { Experience, ExperienceAgent } from "./helpers/Experience";
 import { experienceBattleParser } from "./helpers/experienceBattleParser";

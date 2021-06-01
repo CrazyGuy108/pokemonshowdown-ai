@@ -1,9 +1,11 @@
 import { Args, Protocol } from "@pkmn/protocol";
+import { Event } from "../../parser";
+import { RoomHandler } from "../RoomHandler";
 
 /**
  * Handles global PS messages such as login/initialization and PMs/challenges.
  */
-export class GlobalHandler implements Protocol.Handler
+export class GlobalHandler implements RoomHandler, Protocol.Handler
 {
     /** Callback to update the client's username. */
     public updateUser: ((username: string) => void) | null = null;
@@ -16,6 +18,14 @@ export class GlobalHandler implements Protocol.Handler
             res => this.challstrRes = res)
         .finally(() => this.challstrRes = null);
     private challstrRes: ((challstr: string) => void) | null = null;
+
+    /** @override */
+    public handle(event: Event): void
+    {
+        const key = Protocol.key(event.args);
+        if (!key) return;
+        ((this as Protocol.Handler)[key] as any)?.(event.args, event.kwArgs);
+    }
 
     // list taken from Protocol.GlobalArgs
 

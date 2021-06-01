@@ -2,8 +2,8 @@ import { Protocol } from "@pkmn/protocol";
 import fetch, { RequestInit } from "node-fetch";
 import { client as WSClient } from "websocket";
 import { Logger } from "../Logger";
-import { GlobalHandler } from "./handlers/global";
-import { MessageParser, ProtocolMsg } from "./MessageParser";
+import * as handlers from "./handlers";
+import { MessageParser, RoomEvent } from "./parser";
 
 /** Options for login. */
 export interface LoginOptions
@@ -30,7 +30,7 @@ export type Sender = (...responses: string[]) => boolean;
  * @param sender The function that will be used for sending responses.
  */
 export type HandlerFactory = (room: string, username: string, sender: Sender) =>
-    Protocol.Handler;
+    handlers.RoomHandler;
 
 /** Manages the connection to a PokemonShowdown server. */
 export class PSBot
@@ -38,9 +38,9 @@ export class PSBot
     /** Websocket client. Used for connecting to the server. */
     private readonly client = new WSClient();
     /** Current active rooms. */
-    private readonly rooms: {[room: string]: Protocol.Handler} = {};
+    private readonly rooms = new Map<Protocol.RoomID, handlers.RoomHandler>();
     /** Dictionary of accepted formats for battle challenges. */
-    private readonly formats: {[format: string]: HandlerFactory} = {};
+    private readonly formats = new Map<string, HandlerFactory>();
 
     /** Whether we've already logged in. */
     private loggedIn = false;
@@ -63,7 +63,7 @@ export class PSBot
     private connectedRes: (err?: Error) => void = () => {};
 
     /** Used for handling global PS messages. */
-    private readonly globalHandler = new GlobalHandler();
+    private readonly globalHandler = new handlers.global.GlobalHandler();
     /** Stream used for parsing PS protocol messages. */
     private readonly parser = new MessageParser();
 
@@ -73,7 +73,7 @@ export class PSBot
      */
     constructor(private readonly logger = Logger.stderr)
     {
-        this.rooms[""] = this.globalHandler;
+        this.addHandler("" as Protocol.RoomID, this.globalHandler);
         this.initClient();
         this.globalHandler.updateUser = username => this.updateUser(username);
         this.globalHandler.respondToChallenge =
@@ -88,25 +88,26 @@ export class PSBot
     /**
      * Allows the PSBot to accept battle challenges for the given format.
      * @param format Name of the format to use.
-     * @param fn RoomHandler factory function.
+     * @param f Room handler factory function.
      */
-    public acceptChallenges(format: string, fn: HandlerFactory): void
+    public acceptChallenges(format: string, f: HandlerFactory): void
     {
-        this.formats[format] = fn;
+        this.formats.set(format, f);
     }
 
     /**
      * Adds a handler for a room.
-     * @param room Room name.
+     * @param roomid Room id.
      * @param handler Object that handles messages coming from the given room.
      */
-    public addHandler(room: string, handler: Protocol.Handler): void
+    public addHandler(roomid: Protocol.RoomID, handler: handlers.RoomHandler):
+        void
     {
-        if (this.rooms.hasOwnProperty(room))
+        if (this.rooms.has(roomid))
         {
-            throw new Error(`Already have a handler for room '${room}'`);
+            throw new Error(`Already have a handler for room '${roomid}'`);
         }
-        this.rooms[room] = handler;
+        this.rooms.set(roomid, handler);
     }
 
     // TODO: support reconnects/disconnects
@@ -255,23 +256,25 @@ export class PSBot
     {
         for await (const msg of this.parser)
         {
-            const pmsg = msg as ProtocolMsg;
+            const pmsg = msg as RoomEvent;
             await this.dispatch(pmsg);
         }
     }
 
     /** Handles parsed protocol messages received from the PS serer. */
     private async dispatch<T extends Protocol.ArgName>(
-        {roomid, args, kwArgs}: ProtocolMsg<T>): Promise<void>
+        {roomid, args, kwArgs}: RoomEvent<T>): Promise<void>
     {
-        if (!this.rooms.hasOwnProperty(roomid))
+        let handler = this.rooms.get(roomid);
+        if (!handler)
         {
-            // first msg when joining a room must be |init|chat or |init|battle
+            // first msg when joining a battle room must be |init|battle
             if (args[0] === "init" && args[1] === "battle")
             {
-                // battle rooms follow the naming format battle-<format>-<id>
+                // battle rooms follow a naming convention: battle-<format>-<id>
                 const format = roomid.split("-")[1];
-                if (this.formats.hasOwnProperty(format))
+                const f = this.formats.get(format);
+                if (f)
                 {
                     if (!this.username)
                     {
@@ -279,11 +282,11 @@ export class PSBot
                             `'${roomid}': Username not initialized`);
                         return;
                     }
-                    const sender = (...responses: string[]) =>
+                    const sender: Sender = (...responses: string[]) =>
                         this.addResponses(roomid, ...responses);
 
-                    this.addHandler(roomid,
-                        this.formats[format](roomid, this.username, sender));
+                    handler = f(roomid, this.username, sender);
+                    this.addHandler(roomid, handler);
                 }
                 else
                 {
@@ -294,43 +297,32 @@ export class PSBot
             }
             else
             {
-                this.logger.error(`Could not join room '${roomid}': ` +
+                this.logger.error(`Could not join chat room '${roomid}': ` +
                     "No handlers found");
                 return;
             }
         }
 
-        const handler = this.rooms[roomid];
         const key = Protocol.key(args);
         if (key !== undefined && key in handler)
         {
-            await (handler[key] as any)(args, kwArgs);
+            await handler.handle({args, kwArgs});
+        }
+
+        // custom deinit adapter
+        // see https://github.com/pkmn/ps/issues/8
+        if (args[0] === "" && args[1] === "|deinit")
+        {
+            // roomid defaults to lobby if deinit didn't come from a room
+            this.rooms.delete(roomid || "lobby" as Protocol.RoomID);
+        }
+        // leave respectfully once the battle ends
+        // TODO: move this to BattleHandler
+        else if (args[0] === "tie" || args[0] === "win")
+        {
+            this.addResponses(roomid, "|gg", "|/leave");
         }
     }
-
-    /** Handles a parsed Message received from the PS serer. */
-    /*private async handleMessage(room: string, msg: psAny): Promise<void>
-    {
-        switch (type)
-        {
-            case "deinit":
-                // cleanup after leaving a room
-                delete this.rooms[room];
-                break;
-            case "battleProgress":
-                if (!this.rooms.hasOwnProperty(room)) break;
-                // leave respectfully if the battle ended
-                // TODO: make this into a registered callback
-                for (const event of events)
-                {
-                    if (event.type === "tie" || event.type === "win")
-                    {
-                        this.addResponses(room, "|gg", "|/leave");
-                    }
-                }
-                return this.rooms[room].progress(msg);
-        }
-    }*/
 
     /**
      * Sends a list of responses to the server.

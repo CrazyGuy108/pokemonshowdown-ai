@@ -1,4 +1,4 @@
-import { BattleAgent } from "../../../battle/agent/BattleAgent";
+import { BattleAgent } from "../../../battle/agent";
 
 /** BattleAgent decision data. */
 export interface ExperienceAgentData

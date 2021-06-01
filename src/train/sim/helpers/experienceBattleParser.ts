@@ -1,6 +1,6 @@
-import { Choice, choiceIds } from "../../../battle/agent/Choice";
+import { Choice, choiceIds } from "../../../battle/agent";
 import { BattleParser, BattleParserConfig } from
-    "../../../battle/parser/BattleParser";
+    "../../../battle/parser";
 import { BattleState, ReadonlyBattleState } from
     "../../../psbot/handlers/battle/formats/gen4/state/BattleState";
 import { Experience, ExperienceAgent, ExperienceAgentData } from "./Experience";

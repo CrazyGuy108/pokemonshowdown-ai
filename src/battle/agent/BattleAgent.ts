@@ -13,5 +13,4 @@ import { Choice } from "./Choice";
  * @returns Optional data returned after making a decision.
  */
 export type BattleAgent<TState, TInfo = void> =
-    (state: TState, choices: Choice[], logger?: Logger) =>
-        Promise<TInfo>;
+    (state: TState, choices: Choice[], logger?: Logger) => Promise<TInfo>;

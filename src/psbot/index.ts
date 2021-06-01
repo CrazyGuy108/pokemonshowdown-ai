@@ -6,7 +6,7 @@ import { avatar, latestModelFolder, loginServer, password, playServer,
     username } from "../config";
 import { Logger } from "../Logger";
 import { importTfn } from "../tfn";
-import { PSBattle } from "./PSBattle";
+import * as handlers from "./handlers"
 import { PSBot } from "./PSBot";
 
 // select native backend
@@ -33,6 +33,9 @@ const logger = Logger.stderr;
 
     bot.acceptChallenges("gen4randombattle",
         (room, user, sender) =>
-            new PSBattle(user, agent, sender,
-                logger.addPrefix(`PSBattle(${room}): `)));
+            new handlers.battle.BattleHandler(
+            {
+                format: "gen4", username: user, agent, sender,
+                logger: logger.addPrefix(`BattleHandler(${room}): `)
+            }));
 })();

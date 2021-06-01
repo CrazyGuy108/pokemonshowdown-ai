@@ -1,5 +1,4 @@
-import { BattleAgent } from "../battle/agent/BattleAgent";
-import { Choice, choiceIds, intToChoice } from "../battle/agent/Choice";
+import { BattleAgent, Choice, choiceIds, intToChoice } from "../battle/agent";
 import { ReadonlyBattleState } from "../psbot/handlers/battle/formats/gen4/state/BattleState";
 import { Logger } from "../Logger";
 import { weightedShuffle } from "./helpers";

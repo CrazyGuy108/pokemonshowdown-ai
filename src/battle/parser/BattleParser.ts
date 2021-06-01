@@ -1,6 +1,5 @@
 import { Logger } from "../../Logger";
-import { BattleAgent } from "../agent/BattleAgent";
-import { Choice } from "../agent/Choice";
+import { BattleAgent, Choice } from "../agent";
 
 /**
  * Config for `startBattleParser()`.
@@ -17,8 +16,8 @@ export interface StartBattleParserArgs
     extends Omit<BattleParserContext<any, any, any, TAgent>, "iter" | "state">
 {
     /**
-     * Gets the battle state tracker object that will be used in the
-     * BattleParser. Only called once.
+     * Gets or constructs the battle state tracker object that will be used by
+     * the BattleParser. Only called once.
      */
     getState(): TState;
 }
@@ -27,9 +26,10 @@ export interface StartBattleParserArgs
  * Initializes a BattleParser.
  * @template TEvent Game event type.
  * @template TState Battle state type.
+ * @template TRState Readonly battle state type.
+ * @template TAgent Battle agent type.
  * @template TArgs Additional parameter types.
  * @template TResult Result type.
- * @template TAgent Battle agent type.
  * @param cfg Config and dependencies for the BattleParser.
  * @param parser BattleParser function to call.
  * @returns An iterator for sending TEvents to the BattleParser, as well as a
@@ -40,9 +40,9 @@ export function startBattleParser
     TEvent,
     TState extends TRState,
     TRState,
+    TAgent extends BattleAgent<TRState> = BattleAgent<TRState>,
     TArgs extends any[] = any[],
-    TResult extends BattleParserResult = BattleParserResult,
-    TAgent extends BattleAgent<TRState> = BattleAgent<TRState>
+    TResult extends BattleParserResult = BattleParserResult
 >(
     cfg: StartBattleParserArgs<TState, TRState, TAgent>,
     parser: BattleParser<TEvent, TState, TRState, TAgent, TArgs, TResult>,
