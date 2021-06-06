@@ -1,8 +1,7 @@
-import * as dex from "../dex/dex";
-import * as dexutil from "../dex/dex-util";
-import { Pokemon, ReadonlyPokemon } from "../state/Pokemon";
-import { Side } from "../state/Side";
-import { SubParserConfig, SubParserResult } from "../../../../../../battle/parser/BattleParser";
+import * as dex from "../dex";
+import type { Pokemon, ReadonlyPokemon } from "../state/Pokemon";
+import type { Side } from "../state/Side";
+import type { SubParserConfig, SubParserResult } from "../../../../../../battle/parser/BattleParser";
 import { consume, eventLoop, peek, verify } from "../../../../../../battle/parser/helpers";
 import { handlers as base } from "./base";
 import { createEventInference, EventInference, expectEvents, ExpectEventsResult,

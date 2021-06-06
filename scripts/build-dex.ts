@@ -5,7 +5,8 @@
 import { Generations } from "@pkmn/data";
 import { Dex } from "@pkmn/dex";
 import { SpeciesAbility } from "@pkmn/dex-types";
-import * as dexutil from "../src/battle/dex/dex-util";
+import * as dexutil from
+    "../src/psbot/handlers/battle/formats/gen4/dex/dex-util";
 import { toIdName } from "../src/psbot/helpers";
 
 (async function buildDex()
@@ -1157,13 +1158,13 @@ export function is${cap}Move(value: any): value is ${cap}Move
         const lower = name.charAt(0).toLowerCase() + name.substr(1);
         return `\
 /** Memoization of \`get${name}()\`. */
-const ${lower}Memo = new Map<${dataName}, ${name}>();
+const ${lower}Memo = new Map<${dataName}, wrappers.${name}>();
 
 /** Creates a \`${dataName}\` wrapper. */
-export function get${name}(data: ${dataName}): ${name};
+export function get${name}(data: ${dataName}): wrappers.${name};
 /** Creates a \`${dataName}\` wrapper, or null if not found. */
-export function get${name}(name: string): ${name} | null;
-export function get${name}(name: string | ${dataName}): ${name} | null
+export function get${name}(name: string): wrappers.${name} | null;
+export function get${name}(name: string | ${dataName}): wrappers.${name} | null
 {
     if (typeof name === "string")
     {
@@ -1171,7 +1172,7 @@ export function get${name}(name: string | ${dataName}): ${name} | null
         name = ${mapName}[name];
     }
     let result = ${lower}Memo.get(name);
-    if (!result) ${lower}Memo.set(name, result = new ${name}(name));
+    if (!result) ${lower}Memo.set(name, result = new wrappers.${name}(name));
     return result;
 }`;
     }
@@ -1182,13 +1183,7 @@ export function get${name}(name: string | ${dataName}): ${name} | null
  * @file Generated file containing all the dex data taken from Pokemon Showdown.
  */
 import * as dexutil from "./dex-util";
-import { Ability } from "./wrappers/Ability";
-import { Item } from "./wrappers/Item";
-import { Move } from "./wrappers/Move";
-
-export { Ability } from "./wrappers/Ability";
-export { Item } from "./wrappers/Item";
-export { Move } from "./wrappers/Move";
+import * as wrappers from "./wrappers";
 
 /**
  * Contains info about each pokemon, with alternate forms as separate entries.
