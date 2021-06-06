@@ -53,10 +53,7 @@ export class GlobalHandler implements RoomHandler, Protocol.Handler
     {
         if (!this.respondToChallenge) return;
 
-        // weird typing behavior in Protocol helper
-        // see https://github.com/pkmn/ps/issues/7
-        const json = Protocol.parseChallenges(args[1]) as any as
-            Protocol.SearchState;
+        const json = Protocol.parseChallenges(args[1]);
         for (const [user, format] of Object.entries(json.challengesFrom))
         {
             this.respondToChallenge(user, format);

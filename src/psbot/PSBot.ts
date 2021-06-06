@@ -252,6 +252,10 @@ export class PSBot
         else this.addResponses("", `|/reject ${user}`);
     }
 
+    /**
+     * Sets up a read loop from the MessageParser stream and dispatches parsed
+     * messages to their respective room handlers.
+     */
     private async parserReadLoop(): Promise<void>
     {
         for await (const msg of this.parser)
@@ -309,9 +313,7 @@ export class PSBot
             await handler.handle({args, kwArgs});
         }
 
-        // custom deinit adapter
-        // see https://github.com/pkmn/ps/issues/8
-        if (args[0] === "" && args[1] === "|deinit")
+        if (args[0] === "deinit")
         {
             // roomid defaults to lobby if deinit didn't come from a room
             this.rooms.delete(roomid || "lobby" as Protocol.RoomID);

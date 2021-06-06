@@ -58,6 +58,8 @@ export class BattleHandler
     public readonly format: TFormatType;
     /** Client's username. */
     private readonly username: string;
+    /** Used for sending messages to the assigned server room. */
+    private readonly sender: Sender;
     /** Logger object. */
     private readonly logger: Logger;
 
@@ -86,6 +88,7 @@ export class BattleHandler
     {
         this.format = format;
         this.username = username;
+        this.sender = sender;
         this.logger = logger ?? Logger.stderr;
 
         parser ??= {parse: formats.map[format].parser, args: []};
@@ -95,7 +98,7 @@ export class BattleHandler
                 new Promise<SenderResult>(res =>
                 {
                     this.choiceSenderRes = res;
-                    if (!sender(`|/choose ${choice}`))
+                    if (!this.sender(`|/choose ${choice}`))
                     {
                         this.logger.debug(
                             "Can't send Choice, force accept");
