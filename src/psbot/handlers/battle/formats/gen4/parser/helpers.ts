@@ -3,7 +3,7 @@ import * as dexutil from "../dex/dex-util";
 import { Pokemon } from "../state/Pokemon";
 import { SubReason } from "./EventInference";
 
-// TODO: make these into classes?
+// TODO: make these SubReasons into classes?
 
 /**
  * SubReason value that asserts that the inference is dependent on random

@@ -1,5 +1,5 @@
 import { Protocol } from "@pkmn/protocol";
-import { BattleIterator, BattleParserResult, ChoiceSender, SenderResult } from
+import { BattleIterator, ChoiceSender, SenderResult } from
     "../../../battle/parser";
 import { Logger } from "../../../Logger";
 import { Event } from "../../parser";
@@ -75,7 +75,7 @@ export class BattleHandler
     /** Iterator for sending PS Events to the BattleParser. */
     private readonly iter: BattleIterator<Event>;
     /** Promise for the entire BattleParser to finish. */
-    private readonly finishPromise: Promise<BattleParserResult>;
+    private readonly finishPromise: Promise<void>;
 
     constructor({format, username, parser, agent, sender, logger}:
         BattleHandlerArgs<TFormatType, TAgent>)

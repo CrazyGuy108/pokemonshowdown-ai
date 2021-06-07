@@ -1,126 +1,151 @@
-import { BattleParser, BattleParserResult } from "./BattleParser";
+import { BattleAgent } from "../agent";
+import { BattleParser, BattleParserContext } from "./BattleParser";
 
 /** Maps an event type to a BattleParser handler. */
-export type EventHandlerMap<
-    TResult extends BattleParserResult = BattleParserResult> =
+export type EventHandlerMap
+<
+    TEvent,
+    TState extends TRState,
+    TRState,
+    TAgent extends BattleAgent<TRState> = BattleAgent<TRState>,
+    TArgs extends unknown[] = unknown[],
+    TResult extends unknown = unknown,
+    TEventName extends string = string
+> =
 {
-    readonly [TEventType in events.Type]: SubParser<TResult>
+    readonly [T in TEventName]?:
+        BattleParser<TEvent, TState, TRState, TAgent, TArgs, TResult>;
 };
 
 /**
- * Creates a SubParser that dispatches to an appropriate event handler using the
- * given map.
+ * Creates a BattleParser that dispatches to an appropriate event handler using
+ * the given map, or can return null if no handler is defined for it.
+ * @param handlers Map of event handlers.
+ * @param getKey Function for extracting the TEventName from the TEvent.
  */
-export function createDispatcher(handlers: EventHandlerMap): SubParser
+export function createDispatcher
+<
+    TEvent,
+    TState extends TRState,
+    TRState,
+    TAgent extends BattleAgent<TRState> = BattleAgent<TRState>,
+    TArgs extends unknown[] = unknown[],
+    TResult extends unknown = unknown,
+    TEventName extends string = string
+>(
+    handlers:
+        EventHandlerMap<TEvent, TState, TRState, TAgent, TArgs, TResult,
+            TEventName>,
+    getKey: (event: TEvent) => TEventName | undefined
+): BattleParser<TEvent, TState, TRState, TAgent, TArgs, TResult | null>
 {
-    return async function dispatchEvent(cfg: SubParserConfig):
-        Promise<SubParserResult>
+    return async function dispatcher(
+        ctx: BattleParserContext<TEvent, TState, TRState, TAgent>,
+        ...args: TArgs): Promise<TResult | null>
     {
-        const result = await cfg.iter.peek();
-        if (result.done || !result.value) return {permHalt: true};
-        const event = result.value;
-        // handler should be responsible for verifying and consuming the event
-        return handlers[event.type](cfg);
-    }
-}
-
-/**
- * Creates a top-level BattleParser that loops a SubParser.
- * @param parser Parser function to use. Should be able to accept any
- * BattleEvent.
- * @param stateCtor Function for constructing the BattleState.
- */
-export function baseEventLoop(parser: SubParser, stateCtor: () => BattleState):
-    BattleParser
-{
-    return async function baseLoopParser(cfg: BattleParserConfig):
-        Promise<BattleState>
-    {
-        // create initial battle state
-        const subConfig: SubParserConfig = {...cfg, state: stateCtor()};
-        // dispatch loop
-        while (true)
-        {
-            const {value: preEvent} = await cfg.iter.peek();
-            const result = await parser(subConfig);
-            if (result.permHalt) break;
-            // guard against infinite loops
-            const {value: postEvent} = await cfg.iter.peek();
-            if (preEvent === postEvent)
-            {
-                throw new Error("Parser rejected the first event it was " +
-                    `given: '${JSON.stringify(postEvent)}'`);
-            }
-        }
-        return subConfig.state;
+        const event = await tryPeek(ctx);
+        if (!event) return null;
+        const key = getKey(event);
+        if (!key) return null;
+        const handler = handlers[key];
+        if (!handler) return null;
+        return await handler(ctx, ...args);
     };
 }
 
 /**
- * Keeps calling a SubParser with the given args until it doesn't consume an
- * event or until the end of the event stream.
+ * Creates a BattleParser that continuously calls the given BattleParser until
+ * it stops consuming events or until the end of the event stream.
+ * @param parser Parser function to use.
  */
-export async function eventLoop<TArgs extends any[]>(cfg: SubParserConfig,
-    parser: SubParser<SubParserResult, TArgs>, ...args: TArgs):
-    Promise<SubParserResult>
+export function baseEventLoop
+<
+    TEvent,
+    TState extends TRState,
+    TRState,
+    TAgent extends BattleAgent<TRState> = BattleAgent<TRState>,
+    TArgs extends unknown[] = unknown[],
+>(
+    parser: BattleParser<TEvent, TState, TRState, TAgent, TArgs, unknown>):
+    BattleParser<TEvent, TState, TRState, TAgent, TArgs, void>
 {
-    while (true)
+    return async function baseLoopParser(
+        ctx: BattleParserContext<TEvent, TState, TRState, TAgent>,
+        ...args: TArgs): Promise<void>
     {
-        // "reject" in this case means the parser doesn't consume an event
-        // TODO: should each (or the last?) SubParserResult be returned at the
-        //  end of the eventLoop?
-        const peek1 = await tryPeek(cfg);
-        if (!peek1) return {permHalt: true};
-
-        const result = await parser(cfg, ...args);
-        if (result.permHalt) return {permHalt: true};
-
-        const peek2 = await tryPeek(cfg);
-        if (!peek2) return {permHalt: true};
-
-        if (peek1 === peek2) return {};
-    }
+        while (true)
+        {
+            const preEvent = await tryPeek(ctx);
+            if (!preEvent) break;
+            await parser(ctx, ...args);
+            const postEvent = await tryPeek(ctx);
+            if (preEvent === postEvent) break;
+        }
+    };
 }
 
-/** Peeks at the next BattleEvent. Throws if there are none left. */
-export async function peek(cfg: SubParserConfig): Promise<events.Any>
+/**
+ * Keeps calling a BattleParser with the given args until it doesn't consume an
+ * event or until the end of the event stream.
+ */
+export async function eventLoop
+<
+    TEvent,
+    TState extends TRState,
+    TRState,
+    TAgent extends BattleAgent<TRState> = BattleAgent<TRState>,
+    TArgs extends unknown[] = unknown[]
+>(
+    ctx: BattleParserContext<TEvent, TState, TRState, TAgent>,
+    parser: BattleParser<TEvent, TState, TRState, TAgent, TArgs, unknown>,
+    ...args: TArgs): Promise<void>
 {
-    const event = await tryPeek(cfg);
+    return baseEventLoop(parser)(ctx, ...args);
+}
+
+/** Peeks at the next event. Throws if there are none left. */
+export async function peek<TEvent>(ctx: BattleParserContext<TEvent, any, any>):
+    Promise<TEvent>
+{
+    const event = await tryPeek(ctx);
     if (!event) throw new Error("Expected event");
     return event;
 }
 
-/** Peeks at the next BattleEvent. Returns null if there are none left. */
-export async function tryPeek(cfg: SubParserConfig): Promise<events.Any | null>
+/** Peeks at the next event. Returns null if there are none left. */
+export async function tryPeek<TEvent>(
+    ctx: BattleParserContext<TEvent, any, any>): Promise<TEvent | null>
 {
-    const result = await cfg.iter.peek();
+    const result = await ctx.iter.peek();
     return result.done ? null : result.value;
 }
 
 /**
- * Peeks and verifies the next BattleEvent's type. Throws if there are none
- * left or if the event is invalid.
+ * Peeks and verifies the next event according to the given predicate. Throws if
+ * there are no events left or if the predicate fails.
+ * @param ctx Parser context.
+ * @param pred Event verifier function.
+ * @param errorMsg Function to get a suitable error message.
  */
-export async function verify<T extends events.Type>(cfg: SubParserConfig,
-    type: T): Promise<events.Event<T>>
+export async function verify<TVerified extends TEvent, TEvent>(
+    ctx: BattleParserContext<TEvent, any, any>,
+    pred: (event: TEvent) => event is TVerified,
+    errorMsg?: (event: TEvent) => string): Promise<TVerified>
 {
-    const event = await peek(cfg);
-    if (event.type !== type)
+    const event = await peek(ctx);
+    if (!pred(event))
     {
-        throw new Error(`Invalid event type: Expected '${type}' but got ` +
-            `'${event.type}'`);
+        throw new Error("Invalid event" +
+            `${errorMsg ? `: ${errorMsg(event)}` : ""}`);
     }
-    return event as events.Event<T>;
+    return event;
 }
 
-/**
- * Consumes a BattleEvent. Should be called after `verify()` and/or after the
- * (peeked) event has been fully handled by the calling SubParser. Throws if
- * there are no events left.
- */
-export async function consume(cfg: SubParserConfig): Promise<events.Any>
+/** Consumes an event. Throws if there are no events left.  */
+export async function consume<TEvent>(
+    ctx: BattleParserContext<TEvent, any, any>): Promise<TEvent>
 {
-    const result = await cfg.iter.next(cfg.state);
+    const result = await ctx.iter.next();
     if (result.done) throw new Error("Expected event");
     return result.value;
 }

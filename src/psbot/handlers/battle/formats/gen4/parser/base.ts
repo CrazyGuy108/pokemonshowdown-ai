@@ -1,7 +1,6 @@
 import * as dexutil from "../dex/dex-util";
 import { Pokemon } from "../state/Pokemon";
 import { otherSide, Side } from "../state/Side";
-import { SubParserConfig, SubParserResult } from "../../../../../../battle/parser/BattleParser";
 import { consume, createDispatcher, verify } from "../../../../../../battle/parser/helpers";
 import { activateAbility } from "./activateAbility";
 import { activateItem } from "./activateItem";
@@ -9,6 +8,11 @@ import { halt } from "./halt";
 import { removeItem } from "./removeItem";
 import { switchIn } from "./switchIn";
 import { useMove } from "./useMove";
+import { Event } from "../../../../../parser";
+import { BattleState } from "../state";
+import { Parser, ParserContext } from "../../FormatType";
+import { BattleParserResult } from "../../../../../../battle/parser";
+import { Protocol } from "@pkmn/protocol";
 
 /** Base handlers for each event. */
 export const handlers =
@@ -661,5 +665,13 @@ export const handlers =
     }
 } as const;
 
+const handlers2 =
+{
+    async '|-boost|'(ctx: ParserContext<"gen4">): Promise<void>
+    {
+    }
+} as const;
+
 /** Dispatches event handler. */
-export const dispatch = createDispatcher(handlers);
+export const dispatch =
+    createDispatcher(handlers2, event => Protocol.key(event.args));

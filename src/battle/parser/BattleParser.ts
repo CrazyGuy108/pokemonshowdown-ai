@@ -43,7 +43,7 @@ export function startBattleParser
     TRState,
     TAgent extends BattleAgent<TRState> = BattleAgent<TRState>,
     TArgs extends unknown[] = unknown[],
-    TResult extends BattleParserResult = BattleParserResult
+    TResult extends unknown = unknown
 >(
     cfg: StartBattleParserArgs<TState, TRState, TAgent>,
     parser: BattleParser<TEvent, TState, TRState, TAgent, TArgs, TResult>,
@@ -116,10 +116,10 @@ export type BattleParser
     TRState,
     TAgent extends BattleAgent<TRState> = BattleAgent<TRState>,
     TArgs extends unknown[] = unknown[],
-    TResult extends BattleParserResult = BattleParserResult
+    TResult extends unknown = unknown
 > =
     (ctx: BattleParserContext<TEvent, TState, TRState, TAgent>,
-        ...args: TArgs) => Promise<TResult>
+        ...args: TArgs) => Promise<TResult>;
 
 /**
  * Context container needed to call a BattleParser.
@@ -147,9 +147,6 @@ export interface BattleParserContext
     /** Battle state tracker. */
     readonly state: TState;
 }
-
-/** Extendable BattleParser return type interface. */
-export interface BattleParserResult {}
 
 /**
  * Iterator for retreiving the next event. Also takes the latest BattleState for
