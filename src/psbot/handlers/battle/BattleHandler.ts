@@ -11,13 +11,11 @@ import * as formats from "./formats";
  * Args for BattleHandler constructor.
  * @template TFormatType Battle format for this room.
  * @template TAgent Battle agent type.
- * @template TArgs Additional BattleParser parameter types.
  */
 export interface BattleHandlerArgs
 <
     TFormatType extends formats.FormatType = formats.FormatType,
-    TAgent extends formats.Agent<TFormatType> = formats.Agent<TFormatType>,
-    TArgs extends any[] = any[]
+    TAgent extends formats.Agent<TFormatType> = formats.Agent<TFormatType>
 >
 {
     /** Battle format for this room. */
@@ -25,13 +23,11 @@ export interface BattleHandlerArgs
     /** Client's username. */
     readonly username: string;
     /** BattleParser config. Defaults to format default. */
-    readonly parser?:
-    {
-        /** Function for building up a battle state for the BattleAgent. */
-        readonly parse: formats.Parser<TFormatType, TAgent, TArgs>;
-        /** Additional arguments for the BattleParser. */
-        readonly args: TArgs;
-    }
+    /**
+     * Function for building up a battle state for the BattleAgent. Defaults to
+     * format default.
+     */
+    readonly parser?: formats.Parser<TFormatType, TAgent>;
     /** Function for deciding what to do. */
     readonly agent: TAgent;
     /** Used for sending messages to the assigned server room. */
@@ -44,13 +40,11 @@ export interface BattleHandlerArgs
  * Base handler for battle rooms.
  * @template TFormatType Battle format for this room.
  * @template TAgent Battle agent type.
- * @template TArgs Additional BattleParser parameter types.
  */
 export class BattleHandler
 <
     TFormatType extends formats.FormatType = formats.FormatType,
-    TAgent extends formats.Agent<TFormatType> = formats.Agent<TFormatType>,
-    TArgs extends any[] = any[]
+    TAgent extends formats.Agent<TFormatType> = formats.Agent<TFormatType>
 >
     implements RoomHandler
 {
@@ -84,14 +78,12 @@ export class BattleHandler
     private readonly finishPromise: Promise<BattleParserResult>;
 
     constructor({format, username, parser, agent, sender, logger}:
-        BattleHandlerArgs<TFormatType, TAgent, TArgs>)
+        BattleHandlerArgs<TFormatType, TAgent>)
     {
         this.format = format;
         this.username = username;
         this.sender = sender;
         this.logger = logger ?? Logger.stderr;
-
-        parser ??= {parse: formats.map[format].parser, args: []};
 
         const choiceSender: ChoiceSender =
             choice =>
@@ -112,8 +104,9 @@ export class BattleHandler
             agent, logger: this.logger, sender: choiceSender,
             getState: () => new formats.state[format]()
         };
-        const {iter, finish} = formats.startParser(cfg, parser.parse,
-                ...parser.args);
+
+        const {iter, finish} = formats.startParser(cfg,
+                parser ?? formats.map[format].parser);
         this.iter = iter;
         this.finishPromise = finish;
     }
@@ -155,28 +148,26 @@ export class BattleHandler
         const lastRequest = this.lastRequest;
         this.lastRequest = Protocol.parseRequest(json);
 
-        if (this.unavailableChoice)
-        {
-            // new info may be revealed
-            if (this.unavailableChoice === "switch" &&
-                lastRequest?.requestType === "move" &&
-                lastRequest.active[0] && !lastRequest.active[0].trapped &&
-                this.lastRequest.requestType === "move" &&
-                this.lastRequest.active[0]?.trapped)
-            {
-                this.choiceSenderRes?.("trapped");
-            }
-            else if (this.unavailableChoice === "move" &&
-                this.lastRequest.requestType === "move" &&
-                this.lastRequest.active[0])
-            {
-                this.choiceSenderRes?.("disabled");
-            }
-            else this.choiceSenderRes?.(true);
+        if (!this.unavailableChoice) return;
 
-            this.unavailableChoice = null;
-            return;
+        // new info may be revealed
+        if (this.unavailableChoice === "switch" &&
+            lastRequest?.requestType === "move" &&
+            lastRequest.active[0] && !lastRequest.active[0].trapped &&
+            this.lastRequest.requestType === "move" &&
+            this.lastRequest.active[0]?.trapped)
+        {
+            this.choiceSenderRes?.("trapped");
         }
+        else if (this.unavailableChoice === "move" &&
+            this.lastRequest.requestType === "move" &&
+            this.lastRequest.active[0])
+        {
+            this.choiceSenderRes?.("disabled");
+        }
+        else this.choiceSenderRes?.(true);
+
+        this.unavailableChoice = null;
     }
 
     private handleError(event: Event<"|error|">): void
@@ -190,10 +181,12 @@ export class BattleHandler
             // TODO: does this distinction matter?
             if (s.startsWith("move")) this.unavailableChoice = "move";
             else if (s.startsWith("switch")) this.unavailableChoice = "switch";
+            // now that this info has been revealed, we should get an updated
+            //  |request| message
         }
         else if (reason.startsWith("[Invalid choice]"))
         {
-            // rejected last choice based on known info
+            // rejected last choice based on unrevealed or already-known info
             this.choiceSenderRes?.(true);
         }
     }

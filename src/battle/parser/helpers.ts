@@ -1,10 +1,8 @@
-import { BattleState } from "../../psbot/handlers/battle/formats/gen4/state/BattleState";
-import * as events from "./BattleEvent";
-import { BattleParser, BattleParserConfig, SubParser, SubParserConfig,
-    SubParserResult } from "./BattleParser";
+import { BattleParser, BattleParserResult } from "./BattleParser";
 
-/** Maps BattleEvent type to a SubParser handler. */
-export type EventHandlerMap<TResult extends SubParserResult = SubParserResult> =
+/** Maps an event type to a BattleParser handler. */
+export type EventHandlerMap<
+    TResult extends BattleParserResult = BattleParserResult> =
 {
     readonly [TEventType in events.Type]: SubParser<TResult>
 };

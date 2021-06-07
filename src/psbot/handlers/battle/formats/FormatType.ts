@@ -49,7 +49,7 @@ export type Parser
 <
     T extends FormatType = FormatType,
     TAgent extends Agent<T> = Agent<T>,
-    TArgs extends any[] = any[],
+    TArgs extends unknown[] = unknown[],
     TResult extends BattleParserResult = BattleParserResult,
 > =
     BattleParser<Event, State<T>, ReadonlyState<T>, TAgent, TArgs, TResult>;
@@ -93,7 +93,7 @@ export function startParser
 <
     T extends FormatType = FormatType,
     TAgent extends Agent<T> = Agent<T>,
-    TArgs extends any[] = any[],
+    TArgs extends unknown[] = unknown[],
     TResult extends BattleParserResult = BattleParserResult
 >(
     cfg: StartParserArgs<T, TAgent>, parser: Parser<T, TAgent, TArgs, TResult>,

@@ -13,7 +13,8 @@ export interface StartBattleParserArgs
     TRState,
     TAgent extends BattleAgent<TRState> = BattleAgent<TRState>,
 >
-    extends Omit<BattleParserContext<any, any, any, TAgent>, "iter" | "state">
+    extends Omit<
+        BattleParserContext<unknown, TState, TRState, TAgent>, "iter" | "state">
 {
     /**
      * Gets or constructs the battle state tracker object that will be used by
@@ -41,7 +42,7 @@ export function startBattleParser
     TState extends TRState,
     TRState,
     TAgent extends BattleAgent<TRState> = BattleAgent<TRState>,
-    TArgs extends any[] = any[],
+    TArgs extends unknown[] = unknown[],
     TResult extends BattleParserResult = BattleParserResult
 >(
     cfg: StartBattleParserArgs<TState, TRState, TAgent>,
@@ -114,7 +115,7 @@ export type BattleParser
     TState extends TRState,
     TRState,
     TAgent extends BattleAgent<TRState> = BattleAgent<TRState>,
-    TArgs extends any[] = any[],
+    TArgs extends unknown[] = unknown[],
     TResult extends BattleParserResult = BattleParserResult
 > =
     (ctx: BattleParserContext<TEvent, TState, TRState, TAgent>,
