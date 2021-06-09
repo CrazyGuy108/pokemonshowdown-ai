@@ -22,12 +22,11 @@ export interface BattleHandlerArgs
     readonly format: TFormatType;
     /** Client's username. */
     readonly username: string;
-    /** BattleParser config. Defaults to format default. */
     /**
      * Function for building up a battle state for the BattleAgent. Defaults to
      * format default.
      */
-    readonly parser?: formats.Parser<TFormatType, TAgent>;
+    readonly parser?: formats.Parser<TFormatType, TAgent, [], void>;
     /** Function for deciding what to do. */
     readonly agent: TAgent;
     /** Used for sending messages to the assigned server room. */
@@ -106,6 +105,7 @@ export class BattleHandler
         };
 
         const {iter, finish} = formats.startParser(cfg,
+                // TODO: how to resolve TAgent and Agent<TFormatType, any>?
                 parser ?? formats.map[format].parser);
         this.iter = iter;
         this.finishPromise = finish;

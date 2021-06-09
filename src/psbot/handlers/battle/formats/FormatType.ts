@@ -1,7 +1,6 @@
 import { BattleAgent } from "../../../../battle/agent";
-import { BattleIterator, BattleParser, BattleParserContext, BattleParserResult,
-    startBattleParser, StartBattleParserArgs } from
-    "../../../../battle/parser";
+import { BattleIterator, BattleParser, BattleParserContext, startBattleParser,
+    StartBattleParserArgs } from "../../../../battle/parser";
 import { Event } from "../../../parser";
 import * as formats from "./formats";
 
@@ -50,7 +49,7 @@ export type Parser
     T extends FormatType = FormatType,
     TAgent extends Agent<T> = Agent<T>,
     TArgs extends unknown[] = unknown[],
-    TResult extends BattleParserResult = BattleParserResult,
+    TResult = unknown,
 > =
     BattleParser<Event, State<T>, ReadonlyState<T>, TAgent, TArgs, TResult>;
 
@@ -71,7 +70,7 @@ export type ParserContext
  * @template T Format type.
  * @template TInfo Optional decision info type to return.
  */
-export type Agent<T extends FormatType = FormatType, TInfo = void> =
+export type Agent<T extends FormatType = FormatType, TInfo = any> =
     BattleAgent<ReadonlyState<T>, TInfo>;
 
 /**
@@ -88,13 +87,17 @@ export type StartParserArgs
 
 /**
  * `startBattleParser()` with template arg replaced with format type.
+ * @template T Format type.
+ * @template TAgent Battle agent type.
+ * @template TArgs Additional parameter types.
+ * @template TResult Result type.
  */
 export function startParser
 <
     T extends FormatType = FormatType,
     TAgent extends Agent<T> = Agent<T>,
     TArgs extends unknown[] = unknown[],
-    TResult extends BattleParserResult = BattleParserResult
+    TResult = unknown
 >(
     cfg: StartParserArgs<T, TAgent>, parser: Parser<T, TAgent, TArgs, TResult>,
     ...args: TArgs): {iter: BattleIterator<Event>, finish: Promise<TResult>}

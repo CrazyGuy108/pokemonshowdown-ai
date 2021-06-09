@@ -12,5 +12,5 @@ import { Choice } from "./Choice";
  * @param logger Optional logger object.
  * @returns Optional data returned after making a decision.
  */
-export type BattleAgent<TState, TInfo = void> =
+export type BattleAgent<TState, TInfo = any> =
     (state: TState, choices: Choice[], logger?: Logger) => Promise<TInfo>;

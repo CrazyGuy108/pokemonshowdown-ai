@@ -43,7 +43,7 @@ export function startBattleParser
     TRState,
     TAgent extends BattleAgent<TRState> = BattleAgent<TRState>,
     TArgs extends unknown[] = unknown[],
-    TResult extends unknown = unknown
+    TResult = unknown
 >(
     cfg: StartBattleParserArgs<TState, TRState, TAgent>,
     parser: BattleParser<TEvent, TState, TRState, TAgent, TArgs, TResult>,
@@ -116,7 +116,7 @@ export type BattleParser
     TRState,
     TAgent extends BattleAgent<TRState> = BattleAgent<TRState>,
     TArgs extends unknown[] = unknown[],
-    TResult extends unknown = unknown
+    TResult = unknown
 > =
     (ctx: BattleParserContext<TEvent, TState, TRState, TAgent>,
         ...args: TArgs) => Promise<TResult>;

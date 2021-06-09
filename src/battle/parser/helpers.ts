@@ -98,7 +98,8 @@ export async function eventLoop
 >(
     ctx: BattleParserContext<TEvent, TState, TRState, TAgent>,
     parser: BattleParser<TEvent, TState, TRState, TAgent, TArgs, unknown>,
-    ...args: TArgs): Promise<void>
+    ...args: TArgs
+): Promise<void>
 {
     return baseEventLoop(parser)(ctx, ...args);
 }
