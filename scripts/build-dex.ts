@@ -261,7 +261,7 @@ import { toIdName } from "../src/psbot/helpers";
     for (const move of [...gen.moves]
             .sort((a, b) => a.id < b.id ? -1 : +(a.id > b.id)))
     {
-        if (move.id === "hiddenpower" && move.type !== "Normal") continue;
+        if (move.realMove || move.isNonstandard) continue;
 
         if (!move.noSketch) sketchableMoves.push(move.id);
 
