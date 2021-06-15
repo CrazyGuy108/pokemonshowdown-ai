@@ -307,11 +307,7 @@ export class PSBot
             }
         }
 
-        const key = Protocol.key(args);
-        if (key !== undefined && key in handler)
-        {
-            await handler.handle({args, kwArgs});
-        }
+        await handler.handle({args, kwArgs});
 
         if (args[0] === "deinit")
         {

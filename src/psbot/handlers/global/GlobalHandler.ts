@@ -8,7 +8,7 @@ import { RoomHandler } from "../RoomHandler";
 export class GlobalHandler implements RoomHandler, Protocol.Handler
 {
     /** Callback to update the client's username. */
-    public updateUser: ((username: string) => void) | null = null;
+    public updateUser: ((username: Protocol.Username) => void) | null = null;
     /** Callback to receive a battle challenge from another user. */
     public respondToChallenge: ((user: string, format: string) => void) | null =
         null;

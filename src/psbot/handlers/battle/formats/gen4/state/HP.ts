@@ -1,15 +1,10 @@
 /** Readonly HP representation. */
 export interface ReadonlyHP
 {
-    /** Current HP. */
+    /** Current HP. May be a percentage. */
     readonly current: number;
-    /** Maximum HP. */
+    /** Maximum HP. May be a percentage. */
     readonly max: number;
-    /**
-     * Whether this is represented as a percentage. If true, `max` is `100` and
-     * `current` is the percentage.
-     */
-    readonly isPercent: boolean;
 }
 
 /** Hit points info. */
@@ -17,25 +12,11 @@ export class HP implements ReadonlyHP
 {
     /** @override */
     public get current(): number { return this._current; }
-    private _current: number;
+    private _current = 0;
 
     /** @override */
     public get max(): number { return this._max; }
-    private _max: number;
-
-    /** @override */
-    public readonly isPercent: boolean;
-
-    /**
-     * Creates a full HP object.
-     * @param isPercent Whether this HP is to be reported as a percentage.
-     */
-    constructor(isPercent: boolean)
-    {
-        this.isPercent = isPercent;
-        this._current = 0;
-        this._max = 0;
-    }
+    private _max = 0;
 
     /**
      * Sets the HP.
@@ -50,10 +31,11 @@ export class HP implements ReadonlyHP
 
     /**
      * Encodes all hp data into a string.
+     * @param isPercent Whether to report HP as a percentage.
      * @returns The HP in string form.
      */
-    public toString(): string
+    public toString(isPercent?: boolean): string
     {
-        return `${this._current}/${this._max}${this.isPercent ? "%" : ""}`;
+        return `${this._current}/${this._max}${isPercent ? "%" : ""}`;
     }
 }

@@ -1,2 +1,1 @@
-export * as map from "./formats";
-export * from "./FormatType";
+export * from "./formats";

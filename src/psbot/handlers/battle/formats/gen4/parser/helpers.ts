@@ -1,164 +1,102 @@
-import * as dex from "../dex/dex";
-import * as dexutil from "../dex/dex-util";
-import { Pokemon } from "../state/Pokemon";
-import { SubReason } from "./EventInference";
+import { consume, tryPeek } from "../../../../../../battle/parser";
+import { EventInference, SubInference, SubReason } from
+    "../../../../../../battle/parser/inference";
+import { Event } from "../../../../../parser";
+import { Agent, Parser } from "../../formats";
+import { BattleState, ReadonlyBattleState } from "../state";
 
-// TODO: make these SubReasons into classes?
+type EventInf
+<
+    TAgent extends Agent<"gen4"> = Agent<"gen4">,
+    TArgs extends unknown[] = unknown[],
+    TResult extends unknown = unknown
+> =
+    EventInference<Event, BattleState, ReadonlyBattleState, TAgent, TArgs,
+        TResult>;
 
-/**
- * SubReason value that asserts that the inference is dependent on random
- * factors outside what can be deduced.
- */
-export const chanceReason: SubReason =
-    // TODO: what should delay() do?
-    {assert() {}, reject() {}, delay() { return () => {}; }};
-
-/**
- * Creates a SubReason that asserts that the move being used by the given
- * pokemon is of one of the specified type(s).
- * @param move Move to track.
- * @param user Move user to track.
- * @param types Set of possible move types. Will be owned by this function.
- * @param negative Whether to flip the assertion.
- */
-export function moveIsType(move: dex.Move, user: Pokemon,
-    types: Set<dexutil.Type>, negative?: boolean): SubReason
+class IgnoredReason extends SubReason
 {
-    const {hpType, item} = user; // snapshot in case user changes
-    return {
-        assert: () => move.assertTypes(types, {hpType, item}, negative),
-        reject: () => move.assertTypes(types, {hpType, item}, !negative),
-        delay: cb => move.onUpdateTypes(types, {hpType, item},
-            negative ? held => cb(!held) : cb)
-    };
+    constructor(private readonly onIgnored?: () => void) { super(); }
+    /** @override */
+    public canHold() { return null; }
+    /** @override */
+    public assert() {}
+    /** @override */
+    public reject() { this.onIgnored?.(); }
+    /** @override */
+    protected delayImpl() { return () => {}; }
 }
 
 /**
- * Creates a SubReason that asserts that the holder isn't the same type as the
- * move being used against it.
+ * Creates an EventInference that parses from a single SubInference case.
+ * @template TAgent Battle agent type.
+ * @template TArgs BattleParser's additional parameter types.
+ * @template TResult BattleParser's result type.
+ * @param parser Parser to call. Should call its `accept` callback once it has
+ * verified the initial event and plans on consuming it.
+ * @param onIgnored Function to call if the event never gets parsed.
+ * @param parserArgs Additional args to supply to the parser.
  */
-export function diffMoveType(mon: Pokemon, hitBy: dexutil.MoveAndUser):
-    SubReason
+function singleCaseEventInference
+<
+    TAgent extends Agent<"gen4"> = Agent<"gen4">,
+    TArgs extends unknown[] = unknown[],
+    TResult extends unknown = unknown
+>(
+    parser:
+        Parser<"gen4", TAgent, [accept: () => void, ...args: TArgs], TResult>,
+    onIgnored?: () => void, ...parserArgs: TArgs):
+    EventInf<TAgent, TArgs, TResult>
 {
-    return moveIsType(hitBy.move, hitBy.user, new Set(mon.types),
-        /*negative*/ true);
+    const subInf = new SubInference(new Set([new IgnoredReason(onIgnored)]));
+
+    return new EventInference(
+        new Set([subInf]),
+        async function singleCaseEventInfParser(ctx, accept, ...args: TArgs)
+        {
+            return await parser(ctx, () => accept(subInf), ...args);
+        },
+        ...parserArgs);
 }
 
-/** Creates a SubReason that asserts that the pokemon has the given ability. */
-export function hasAbility(mon: Pokemon, abilities: Set<string>,
-    negative?: boolean): SubReason
-{
-    const {ability} = mon.traits; // snapshot in case traits changes
-    return {
-        // TODO: guard against overnarrowing? need a better framework for error
-        //  handling/logging
-        assert: () => negative ? ability.remove(abilities)
-            : ability.narrow(abilities),
-        reject: () => negative ? ability.narrow(abilities)
-            : ability.remove(abilities),
-        delay: cb => ability.onUpdate(abilities,
-            negative ? kept => cb(!kept) : cb)
-    };
-}
 
-/** Klutz check wrapped in a bounds check. */
-export function cantHaveKlutz(mon: Pokemon): Set<SubReason> | null
-{
-    const klutz = checkKlutz(mon);
-    if (klutz.size <= 0) return new Set();
-    if (klutz.size >= mon.traits.ability.size) return null;
-    return new Set([hasAbility(mon, klutz, /*negative*/ true)]);
-}
+/** Predicate function type for {@link singleEventInference}. */
+export type SingleEventInfPredicate<TEvent extends Event> =
+    (event: Event) => event is TEvent;
 
 /**
- * Checks for item-ignoring abilities.
- * @returns A Set of possible item-ignoring abilities (empty if none are
- * possible).
+ * Creates an EventInference that parses after verifying a single Event, or that
+ * returns null if the event could not be verified.
+ * @template TEvent Specific event type for further parsing.
+ * @template TAgent Battle agent type.
+ * @template TArgs BattleParser's additional parameter types.
+ * @template TResult BattleParser's result type.
+ * @param pred Predicate to verify the initial event before accepting it.
+ * @param parser Parser to call after accepting/consuming the initial event for
+ * further parsing.
+ * @param onIgnored Function to call if the event never gets parsed.
+ * @param parserArgs Additional args to supply to the parser.
  */
-export function checkKlutz(mon: Pokemon): Set<string>
+export function singleEventInference
+<
+    TEvent extends Event,
+    TAgent extends Agent<"gen4"> = Agent<"gen4">,
+    TArgs extends unknown[] = unknown[],
+    TResult extends unknown = unknown
+>(
+    pred: SingleEventInfPredicate<TEvent>,
+    parser: Parser<"gen4", TAgent, [event: TEvent, ...args: TArgs], TResult>,
+    onIgnored?: () => void,
+    ...parserArgs: TArgs): EventInf<TAgent, TArgs, TResult | null>
 {
-    if (mon.volatile.suppressAbility) return new Set();
-
-    const {ability} = mon.traits;
-    const abilities = new Set<string>();
-    for (const n of ability.possibleValues)
-    {
-        if (ability.map[n].flags?.ignoreItem) abilities.add(n);
-    }
-    return abilities;
-}
-
-/**
- * Creates a SubReason that asserts that the pokemon has the given item.
- * @param mon Potential item holder.
- * @param items Item names to track.
- * @param negative Whether to flip the assertion.
- */
-export function hasItem(mon: Pokemon, items: Set<string>, negative?: boolean):
-    SubReason
-{
-    const {item} = mon; // snapshot in case item changes
-    return {
-        assert: () => negative ? item.remove(items) : item.narrow(items),
-        reject: () => negative ? item.narrow(items) : item.remove(items),
-        delay: cb => item.onUpdate(items, negative ? kept => cb(!kept) : cb)
-    };
-}
-
-/** Creates a SubReason that asserts that the opponent has a held item. */
-export function opponentHasItem(opp: Pokemon): SubReason
-{
-    return hasItem(opp, new Set(["none"]), /*negative*/ true);
-}
-
-/**
- * Checks if a Pokemon has been reduced to 1 hp.
- * @returns A Set of assertions if it's possible to be at 1hp, or null if
- * it's not possible.
- */
-export function isAt1HP(mon: Pokemon): Set<SubReason> | null
-{
-    const hpDisplay = mon.hp.current;
-
-    // 0 hp
-    if (hpDisplay <= 0) return null;
-    // known hp
-    if (!mon.hp.isPercent) return hpDisplay === 1 ? new Set() : null;
-
-    // unknown %hp
-    // look through each possible maxhp stat number to see if it's definite or
-    //  possible that we're at 1 hp
-    // TODO: what about pixel-based displays rather than percent?
-    // note: pixel-accurate equation is pixels = floor(hp/maxhp * 48), with
-    //  an additional check to force pixels=1 if hp>1 but the pixels round
-    //  down to 0
-    let result: Set<SubReason> | null = null;
-    let guaranteed = true;
-    const {max: maxhpHi, min: maxhpLo} = mon.traits.stats.hp;
-    for (let i = maxhpLo; i <= maxhpHi; ++i)
-    {
-        // note: according to PS, percentage = ceil(hp/maxhp * 100), with an
-        //  additional check to force percentage=99 if hp < maxhp but the
-        //  percentage rounds up to 100
-        // this value is the hpDisplay we should get at 1hp
-        const minPercent = Math.ceil(100 / i);
-
-        // verify that this hp stat is possible
-        // TODO: use this to narrow/assert hp stat
-        if (hpDisplay < minPercent) continue;
-
-        // under 200 max hp, minPercent is guaranteed to map to 1hp only due to
-        //  ceiling op
-        // otherwise, multiple hp values could be represented by hpDisplay=1%
-        if (i >= 200) guaranteed = false;
-
-        // verify that the hp display is as expected for 1hp
-        if (hpDisplay === minPercent) result ??= new Set();
-        // if we really are at 1hp, then this hp stat is impossible
-        else guaranteed = false;
-    }
-
-    // TODO: replace chanceReason with hp stat assertions
-    if (result && !guaranteed) result.add(chanceReason);
-    return result;
+    return singleCaseEventInference(
+        async function singleEventInfParser(ctx, accept, ...args: TArgs)
+        {
+            const event = await tryPeek(ctx);
+            if (!event || !pred(event)) return null;
+            accept();
+            await consume(ctx);
+            return await parser(ctx, event, ...args);
+        },
+        onIgnored, ...parserArgs);
 }

@@ -76,6 +76,7 @@ export class BattleHandler
     /** Promise for the entire BattleParser to finish. */
     private readonly finishPromise: Promise<void>;
 
+    /** Creates a BattleHandler. */
     constructor({format, username, parser, agent, sender, logger}:
         BattleHandlerArgs<TFormatType, TAgent>)
     {
@@ -101,12 +102,12 @@ export class BattleHandler
         const cfg: formats.StartParserArgs<TFormatType, TAgent> =
         {
             agent, logger: this.logger, sender: choiceSender,
-            getState: () => new formats.state[format]()
+            getState: () => new formats.state[format](this.username)
         };
 
         const {iter, finish} = formats.startParser(cfg,
                 // TODO: how to resolve TAgent and Agent<TFormatType, any>?
-                parser ?? formats.map[format].parser);
+                parser ?? formats.parser[format]);
         this.iter = iter;
         this.finishPromise = finish;
     }

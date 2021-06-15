@@ -1,7 +1,6 @@
-import { SwitchOptions } from "../../../../../../battle/parser/BattleEvent";
+import { SideID } from "@pkmn/sim";
 import { BattleState, ReadonlyBattleState } from "./BattleState";
 import { Pokemon, ReadonlyPokemon } from "./Pokemon";
-import { Side } from "./Side";
 import { ReadonlyTeamStatus, TeamStatus } from "./TeamStatus";
 
 /** Readonly Team representation. */
@@ -9,8 +8,8 @@ export interface ReadonlyTeam
 {
     /** Reference to the parent BattleState. */
     readonly state?: ReadonlyBattleState;
-    /** Which Side this Team is on. */
-    readonly side: Side;
+    /** Which side this Team is on. */
+    readonly side: SideID;
     /** Current active pokemon. */
     readonly active: ReadonlyPokemon;
     /**
@@ -25,6 +24,21 @@ export interface ReadonlyTeam
     readonly pokemon: readonly (ReadonlyPokemon | null | undefined)[];
     /** Team-related status conditions. */
     readonly status: ReadonlyTeamStatus;
+}
+
+/** Data for handling a switch-in. */
+export interface SwitchOptions
+{
+    /** Species id name. */
+    readonly species: string;
+    /** Level between 1 and 100. */
+    readonly level: number;
+    /** Pokemon's gender. Can be M, F, or null. */
+    readonly gender: string | null;
+    /** Pokemon's current HP. */
+    readonly hp: number;
+    /** Pokemon's max HP. */
+    readonly hpMax: number;
 }
 
 /** Options for `Team#reveal()`. */
@@ -43,7 +57,7 @@ export class Team implements ReadonlyTeam
     /** @override */
     public readonly state?: BattleState;
     /** @override */
-    public readonly side: Side;
+    public readonly side: SideID;
 
     // as long as at least one pokemon was revealed, this will be valid
     /** @override */
@@ -91,7 +105,7 @@ export class Team implements ReadonlyTeam
      * @param state Reference to the parent BattleState.
      * @param size Total known size of team.
      */
-    constructor(side: Side, state?: BattleState, size = Team.maxSize)
+    constructor(side: SideID, state?: BattleState, size = Team.maxSize)
     {
         this.state = state;
         this.side = side;
@@ -183,14 +197,14 @@ export class Team implements ReadonlyTeam
         // team already full
         if (this.unrevealed === this._size) return -1;
 
-        const newMon = new Pokemon(species, /*hpPercent*/ this.side === "them",
-            level, moves, this);
+        const newMon = new Pokemon(species, level, moves, this);
         this._pokemon[this.unrevealed] = newMon;
 
         // initialize new pokemon
         newMon.gender = gender;
         newMon.hp.set(hp, hpMax);
-        if (!newMon.hp.isPercent) newMon.traits.stats.hp.set(hpMax);
+        const hpPercent = this.state?.ourSide === this.side;
+        if (!hpPercent) newMon.traits.stats.hp.set(hpMax);
 
         return this.unrevealed++;
     }
@@ -210,13 +224,19 @@ export class Team implements ReadonlyTeam
     public toString(indent = 0): string
     {
         const s = " ".repeat(indent);
-        return `\
-${s}status: ${this.status.toString()}
-${this._pokemon.map(
-    (mon, i) => `${s}mon${i + 1}:${
-        mon === null ? " <unrevealed>"
-        : !mon ? " <empty>"
-        : `\n${mon.toString(indent + 4)}`}`)
-    .join("\n")}`;
+        let res = `${s}status: ${this.status.toString()}`;
+        for (let i = 0; i < this._pokemon.length; ++i)
+        {
+            const mon = this._pokemon[i];
+            res += `\n${s}mon${i + 1}:`;
+            if (mon === null) res += " <unrevealed>";
+            else if (!mon) res += " <empty>";
+            else
+            {
+                const hpPercent = this.state?.ourSide === this.side;
+                res += "\n" + mon.toString(indent + 4, hpPercent);
+            }
+        }
+        return res;
     }
 }

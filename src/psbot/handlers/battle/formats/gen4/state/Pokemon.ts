@@ -6,7 +6,7 @@ import { Move } from "./Move";
 import { Moveset, ReadonlyMoveset } from "./Moveset";
 import { PokemonTraits, ReadonlyPokemonTraits } from "./PokemonTraits";
 import { PossibilityClass, ReadonlyPossibilityClass } from "./PossibilityClass";
-import { Team } from "./Team";
+import { ReadonlyTeam, Team } from "./Team";
 import { ReadonlyVolatileStatus, VolatileStatus } from "./VolatileStatus";
 
 /** Options for `Pokemon#transformPost()`. */
@@ -23,6 +23,8 @@ export interface MoveData
 /** Readonly Pokemon representation. */
 export interface ReadonlyPokemon
 {
+    /** Reference to the parent Team. */
+    readonly team?: ReadonlyTeam;
     /** Whether this is the current active pokemon. */
     readonly active: boolean;
 
@@ -81,6 +83,8 @@ export interface ReadonlyPokemon
 /** Holds all the possibly incomplete info about a pokemon. */
 export class Pokemon implements ReadonlyPokemon
 {
+    /** @override */
+    public readonly team?: Team;
     /** @override */
     public get active(): boolean { return !!this._volatile; }
 
@@ -396,13 +400,12 @@ export class Pokemon implements ReadonlyPokemon
     /**
      * Creates a Pokemon.
      * @param species Species name.
-     * @param hpPercent Whether to report HP as a percentage.
      * @param level Level for stat calcs.
      * @param moves Optional moveset to fill in.
      * @param team Optional reference to the parent Team.
      */
-    constructor(species: string, hpPercent: boolean, level = 100,
-        moves?: readonly string[], public readonly team?: Team)
+    constructor(species: string, level = 100, moves?: readonly string[],
+        team?: Team)
     {
         if (!dex.pokemon.hasOwnProperty(species))
         {
@@ -411,9 +414,13 @@ export class Pokemon implements ReadonlyPokemon
         const data = dex.pokemon[species];
 
         this._baseTraits = PokemonTraits.base(data, level)
+
         if (moves) this.baseMoveset = new Moveset(moves, moves.length);
         else this.baseMoveset = new Moveset(data.movepool);
-        this.hp = new HP(hpPercent);
+
+        if (team) this.team = team;
+
+        this.hp = new HP();
     }
 
     /** Indicates that the pokemon spent its turn being inactive. */
@@ -462,6 +469,7 @@ export class Pokemon implements ReadonlyPokemon
         const state = mon?.team?.state;
         if (state)
         {
+            // TODO: go through each active mon and set mirrorMove[this side] = null
             if (state.teams.us.active?.active)
             {
                 state.teams.us.active.volatile.mirrorMove = null;
@@ -550,14 +558,15 @@ export class Pokemon implements ReadonlyPokemon
     /**
      * Encodes all pokemon data into a string.
      * @param indent Indentation level to use.
+     * @param hpPercent Whether to report HP as a percentage.
      * @returns The Pokemon in string form.
      */
-    public toString(indent = 0): string
+    public toString(indent = 0, hpPercent?: boolean): string
     {
         const s = " ".repeat(indent);
         return `\
 ${s}${this.stringifySpecies()}${this.gender ? ` ${this.gender}` : ""} \
-${this.hp.toString()}
+${this.hp.toString(hpPercent)}
 ${s}stats: ${this.stringifyStats()}
 ${s}status: ${this.majorStatus.toString()}
 ${s}active: ${this.active}\

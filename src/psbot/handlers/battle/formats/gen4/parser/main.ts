@@ -1,7 +1,15 @@
-import { baseEventLoop } from "../../../../../../battle/parser/helpers";
-import { Agent, Parser } from "../../FormatType";
+import { baseEventLoop } from "../../../../../../battle/parser";
+import { ParserContext } from "../../formats";
 import { dispatch } from "./base";
+import { init } from "./init";
+
+const turnLoop = baseEventLoop(dispatch);
 
 /** Main entry point for the gen4 parser. */
-export const main: Parser<"gen4", Agent<"gen4">, [], void> =
-    baseEventLoop(dispatch);
+export async function main(ctx: ParserContext<"gen4">)
+{
+    // initial events
+    await init(ctx);
+    // TODO: turn1 switch-ins, turn loop
+    await turnLoop(ctx);
+}
