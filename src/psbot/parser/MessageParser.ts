@@ -22,6 +22,7 @@ export class MessageParser extends Transform
             {
                 this.push(msg);
             }
+            // TODO: send a "halt" signal after parsing a block
         }
         catch (e) { return callback(e); }
         callback();

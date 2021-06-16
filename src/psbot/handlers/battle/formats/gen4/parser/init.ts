@@ -65,10 +65,10 @@ const initBattle = () =>
                 throw new Error("Expected room type 'battle' but got " +
                     `'${event.args[1]}'`)
             }
-        },
-        // this message isn't shown if we're not in a battle room, e.g. when
-        //  using the sim's battle stream api
-        () => {});
+        }
+        // note: this message isn't shown if we're not in a battle room, e.g.
+        //  when using the sim's battle stream api, hence why onIgnored is empty
+        );
 
 const gameType = () =>
     singleEventInference(
@@ -227,7 +227,7 @@ function initRequest(state: BattleState, req: Protocol.Request)
         const revealOpts: TeamRevealOptions =
         {
             species: reqMon.name, level: reqMon.level,
-            gender: reqMon.gender ?? null, hp: reqMon.hp, hpMax: reqMon.maxhp,
+            gender: reqMon.gender ?? "N", hp: reqMon.hp, hpMax: reqMon.maxhp,
             moves
         };
         const mon = team.reveal(revealOpts)!;

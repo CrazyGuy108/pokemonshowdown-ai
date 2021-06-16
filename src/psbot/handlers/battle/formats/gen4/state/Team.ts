@@ -1,4 +1,4 @@
-import { SideID } from "@pkmn/sim";
+import { GenderName, SideID } from "@pkmn/types";
 import { BattleState, ReadonlyBattleState } from "./BattleState";
 import { Pokemon, ReadonlyPokemon } from "./Pokemon";
 import { ReadonlyTeamStatus, TeamStatus } from "./TeamStatus";
@@ -34,7 +34,7 @@ export interface SwitchOptions
     /** Level between 1 and 100. */
     readonly level: number;
     /** Pokemon's gender. Can be M, F, or null. */
-    readonly gender: string | null;
+    readonly gender: GenderName;
     /** Pokemon's current HP. */
     readonly hp: number;
     /** Pokemon's max HP. */
