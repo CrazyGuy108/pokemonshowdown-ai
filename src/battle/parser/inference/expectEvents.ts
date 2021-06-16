@@ -39,37 +39,30 @@ export async function expectEvents
     {
         const preParse = await tryPeek(_ctx);
         if (!preParse) return;
+        // test each EventInference (in order of priority) on the next event
         for (let i = 0; i < inferences.length; ++i)
         {
-            // see if the EventInference takes the event
             const inf = inferences[i];
             const {result, accepted} = await inf.parse(_ctx);
-
-            // if it didn't, try a different EventInference
-            const postParse = await tryPeek(_ctx);
-            if (preParse === postParse)
+            if (accepted)
             {
-                if (accepted)
+                const postParse = await tryPeek(_ctx);
+                // EventInferences that accept must consume at least one event,
+                //  otherwise the eventLoop() would stop prematurely
+                if (preParse === postParse)
                 {
-                    throw new Error("BattleParser called accept callback but " +
-                        "didn't parse anything");
+                    // TODO: include unparsed event?
+                    throw new Error("EventInference accepted an event but " +
+                        "didn't parse it");
                 }
-                continue;
+                inferences.splice(i, 1);
+                results.push(result);
+                break;
             }
-
-            // if it did, we can move on to the next event
-            if (!accepted)
-            {
-                throw new Error("BattleParser parsed something but didn't " +
-                    "call accept callback");
-            }
-            inferences.splice(i, 1);
-            results.push(result);
-            break;
         }
     });
 
-    // reject EventInferences that never got to consume an event
+    // reject EventInferences that never got to accept an event
     for (const inf of inferences) inf.reject();
 
     return results;

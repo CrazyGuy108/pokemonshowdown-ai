@@ -5,64 +5,7 @@ import { Event } from "../../../../../parser";
 import { Agent, Parser } from "../../formats";
 import { BattleState, ReadonlyBattleState } from "../state";
 
-type EventInf
-<
-    TAgent extends Agent<"gen4"> = Agent<"gen4">,
-    TArgs extends unknown[] = unknown[],
-    TResult extends unknown = unknown
-> =
-    EventInference<Event, BattleState, ReadonlyBattleState, TAgent, TArgs,
-        TResult>;
-
-class IgnoredReason extends SubReason
-{
-    constructor(private readonly onIgnored?: () => void) { super(); }
-    /** @override */
-    public canHold() { return null; }
-    /** @override */
-    public assert() {}
-    /** @override */
-    public reject() { this.onIgnored?.(); }
-    /** @override */
-    protected delayImpl() { return () => {}; }
-}
-
-/**
- * Creates an EventInference that parses from a single SubInference case.
- * @template TAgent Battle agent type.
- * @template TArgs BattleParser's additional parameter types.
- * @template TResult BattleParser's result type.
- * @param parser Parser to call. Should call its `accept` callback once it has
- * verified the initial event and plans on consuming it.
- * @param onIgnored Function to call if the event never gets parsed.
- * @param parserArgs Additional args to supply to the parser.
- */
-function singleCaseEventInference
-<
-    TAgent extends Agent<"gen4"> = Agent<"gen4">,
-    TArgs extends unknown[] = unknown[],
-    TResult extends unknown = unknown
->(
-    parser:
-        Parser<"gen4", TAgent, [accept: () => void, ...args: TArgs], TResult>,
-    onIgnored?: () => void, ...parserArgs: TArgs):
-    EventInf<TAgent, TArgs, TResult>
-{
-    const subInf = new SubInference(new Set([new IgnoredReason(onIgnored)]));
-
-    return new EventInference(
-        new Set([subInf]),
-        async function singleCaseEventInfParser(ctx, accept, ...args: TArgs)
-        {
-            return await parser(ctx, () => accept(subInf), ...args);
-        },
-        ...parserArgs);
-}
-
-
-/** Predicate function type for {@link singleEventInference}. */
-export type SingleEventInfPredicate<TEvent extends Event> =
-    (event: Event) => event is TEvent;
+// TODO: move these helper funcs to battle/parser/inference?
 
 /**
  * Creates an EventInference that parses after verifying a single Event, or that
@@ -82,7 +25,7 @@ export function singleEventInference
     TEvent extends Event,
     TAgent extends Agent<"gen4"> = Agent<"gen4">,
     TArgs extends unknown[] = unknown[],
-    TResult extends unknown = unknown
+    TResult = unknown
 >(
     pred: SingleEventInfPredicate<TEvent>,
     parser: Parser<"gen4", TAgent, [event: TEvent, ...args: TArgs], TResult>,
@@ -99,4 +42,63 @@ export function singleEventInference
             return await parser(ctx, event, ...args);
         },
         onIgnored, ...parserArgs);
+}
+
+/** Predicate function type for {@link singleEventInference}. */
+export type SingleEventInfPredicate<TEvent extends Event> =
+    (event: Event) => event is TEvent;
+
+// TODO: move this to formats.ts?
+/** Shortened EventInference helper type. */
+export type EventInf
+<
+    TAgent extends Agent<"gen4"> = Agent<"gen4">,
+    TArgs extends unknown[] = unknown[],
+    TResult = unknown
+> =
+    EventInference<Event, BattleState, ReadonlyBattleState, TAgent, TArgs,
+        TResult>;
+
+/**
+ * SubReason that never resolves on its own and has a callback for when it gets
+ * rejected by the parent SubInference.
+ */
+// tslint:disable-next-line: max-classes-per-file
+class IgnoredReason extends SubReason
+{
+    constructor(private readonly onIgnored?: () => void) { super(); }
+    /** @override */
+    public reject() { this.onIgnored?.(); }
+}
+
+/**
+ * Creates an EventInference that parses from a single SubInference case.
+ * @template TAgent Battle agent type.
+ * @template TArgs BattleParser's additional parameter types.
+ * @template TResult BattleParser's result type.
+ * @param parser Parser to call. Should call its `accept` callback once it has
+ * verified the initial event and plans on consuming it.
+ * @param onIgnored Function to call if the event never gets parsed.
+ * @param parserArgs Additional args to supply to the parser.
+ */
+export function singleCaseEventInference
+<
+    TAgent extends Agent<"gen4"> = Agent<"gen4">,
+    TArgs extends unknown[] = unknown[],
+    TResult = unknown
+>(
+    parser:
+        Parser<"gen4", TAgent, [accept: () => void, ...args: TArgs], TResult>,
+    onIgnored?: () => void, ...parserArgs: TArgs):
+    EventInf<TAgent, TArgs, TResult>
+{
+    const subInf = new SubInference(new Set([new IgnoredReason(onIgnored)]));
+
+    return new EventInference(
+        new Set([subInf]),
+        async function singleCaseEventInfParser(ctx, accept, ...args: TArgs)
+        {
+            return await parser(ctx, () => accept(subInf), ...args);
+        },
+        ...parserArgs);
 }

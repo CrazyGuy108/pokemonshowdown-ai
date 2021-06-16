@@ -77,7 +77,8 @@ export class EventInference
      * Attempts to parse some events.
      * @param ctx Parser context.
      * @returns The result from the wrapped BattleParser, as well as a boolean
-     * indicating whether the accept callback provided to it was ever called.
+     * indicating whether this EventInference accepted the parsed events or it
+     * needs more/different events at a later time.
      */
     public async parse(
         ctx: BattleParserContext<TEvent, TState, TRState, TAgent>):

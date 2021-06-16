@@ -9,14 +9,26 @@ export type CancelCallback = () => void;
 
 // TODO: rename to assumption or premise?
 /** Reason for a SubInference to activate. */
-export abstract class SubReason
+export class SubReason
 {
-    /** Checks whether the reason currently holds. Returns null if unknown. */
-    public abstract canHold(): boolean | null;
-    /** Asserts that the reason holds. Requires `#canHold()=true`. */
-    public abstract assert(): void;
-    /** Asserts that the reason cannot hold. */
-    public abstract reject(): void;
+    /**
+     * Checks whether the reason currently holds. Returns null if unknown.
+     * @virtual
+     */
+    public canHold(): boolean | null { return null; }
+
+    /**
+     * Asserts that the reason holds. Requires `#canHold()=true`.
+     * @virtual
+     */
+    public assert(): void {}
+
+    /**
+     * Asserts that the reason cannot hold.
+     * @virtual
+     */
+    public reject(): void {}
+
     /**
      * Sets up callbacks to wait for more information before asserting.
      * @param cb Callback for when the reason has been proven or disproven. Can
@@ -41,6 +53,7 @@ export abstract class SubReason
      * be called immediately.
      * @returns A callback to cancel this call. Should be called automatically
      * when this function calls `cb`. Should do nothing if called again.
+     * @virtual
      */
-    protected abstract delayImpl(cb: DelayCallback): CancelCallback;
+    protected delayImpl(cb: DelayCallback): CancelCallback { return () => {}; }
 }

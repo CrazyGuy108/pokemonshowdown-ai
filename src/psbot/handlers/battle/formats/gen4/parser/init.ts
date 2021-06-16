@@ -4,29 +4,55 @@
  */
 import { Protocol } from "@pkmn/protocol";
 import { GenerationNum, StatID } from "@pkmn/types";
+import { consume, peek } from "../../../../../../battle/parser";
 import { expectEvents } from "../../../../../../battle/parser/inference";
 import { Event } from "../../../../../parser";
 import { ParserContext } from "../../formats";
 import { HPType } from "../dex";
 import { BattleState } from "../state";
 import { TeamRevealOptions } from "../state/Team";
-import { singleEventInference, SingleEventInfPredicate } from "./helpers";
+import { singleCaseEventInference, singleEventInference,
+    SingleEventInfPredicate } from "./helpers";
 
+/**
+ * Parses the initialization step of a battle up to but not including the first
+ * switch-ins.
+ */
 export async function init(ctx: ParserContext<"gen4">)
 {
     // initialization events
     await expectEvents(ctx,
     [
-        initBattle(), gameType(), player(1), request(/*first*/ true), player(2),
-        teamSize(1), teamSize(2), gen(4), tier()
-        // TODO: |rated|, |seed|, |split|, |teampreview|, |clearpoke|, |poke|
-        // TODO: how to ignore irrelevant events?
+        ignoredUpToStart(), initBattle(), gameType(), player(1),
+        request(/*first*/ true), player(2), teamSize(1), teamSize(2), gen(4),
+        tier()
+        // TODO: |rated|, |seed|, |split|, |teampreview|, |clearpoke|, |poke|,
+        //  |rule|
     ]);
-    // blank
-    await expectEvents(ctx, [done()]);
-    // |start event indicating the start of the battle event loop
-    await expectEvents(ctx, [start()]);
 }
+
+/** Consumes all irrelevant events up to the final `|start` event. */
+const ignoredUpToStart = () =>
+    singleCaseEventInference(
+        async function ignoredEventsParser(ctx, accept)
+        {
+            const event = await peek(ctx);
+            switch (event.args[0])
+            {
+                case "init": case "gametype": case "player": case "request":
+                case "player": case "teamsize": case "gen": case "tier":
+                    break;
+                case "start":
+                    // initialization phase ends on the |start event
+                    accept();
+                    // fallthrough
+                default:
+                    // consume event but don't accept it so the parser can be
+                    //  called again later to consume another irrelevant event
+                    await consume(ctx);
+            }
+        },
+        () => { throw new Error("Expected |start event"); });
 
 const initBattle = () =>
     singleEventInference(
@@ -133,20 +159,10 @@ const rule = () =>
             await expectEvents(ctx, [rule()]);
         });
 
-const done = () =>
-    singleEventInference(
-        (event => event.args[0] === "done") as
-            SingleEventInfPredicate<Event<"|done|">>,
-        async () => {},
-        () => { throw new Error(`Expected |done| event`); });
-
-const start = () =>
-    singleEventInference(
-        (event => event.args[0] === "start") as
-            SingleEventInfPredicate<Event<"|start|">>,
-        async () => {},
-        () => { throw new Error(`Expected |start event`); });
-
+/**
+ * Initializes the client's side of the battle using an initial `|request|`
+ * message JSON.
+ */
 function initRequest(state: BattleState, req: Protocol.Request)
 {
     if (!req.side) return;
