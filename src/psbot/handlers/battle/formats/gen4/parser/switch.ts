@@ -41,22 +41,21 @@ const switchEffectsInf = (mon: Pokemon) =>
     singleCaseEventInference(
         async function turn1SwitchEffectsParser(ctx, accept)
         {
-            // TODO: lookahead to verify that we can parse
-            accept();
-            await parseSwitchEffects(ctx, mon);
+            return await parseSwitchEffects(ctx, accept, mon);
         });
 
 /** Parses single `|switch|` event and its implications. */
-export async function parseSwitch(ctx: ParserContext<"gen4">)
+export async function parseSwitch(ctx: ParserContext<"gen4">,
+    accept: (() => void) | null)
 {
     const event = await verifyNext(ctx, "|switch|");
-    const mon = await parseSwitchEvent(ctx, event);
-    await parseSwitchEffects(ctx, mon);
+    const mon = await parseSwitchEvent(ctx, accept, event);
+    await parseSwitchEffects(ctx, /*accept*/ null, mon);
 }
 
 /** Parses initial `|switch|` event and returns the switched-in Pokemon obj. */
 async function parseSwitchEvent(ctx: ParserContext<"gen4">,
-    event: Event<"|switch|">): Promise<Pokemon>
+    accept: (() => void) | null, event: Event<"|switch|">): Promise<Pokemon>
 {
     const [_, identStr, detailsStr, healthStr] = event.args;
 
@@ -80,7 +79,9 @@ async function parseSwitchEvent(ctx: ParserContext<"gen4">,
 }
 
 /** Parses any effects that should happen after a switch-in. */
-async function parseSwitchEffects(ctx: ParserContext<"gen4">, mon: Pokemon)
+async function parseSwitchEffects(ctx: ParserContext<"gen4">,
+    accept: (() => void) | null, mon: Pokemon)
 {
     // TODO
+    accept?.();
 }
