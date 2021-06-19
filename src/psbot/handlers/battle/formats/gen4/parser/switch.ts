@@ -1,62 +1,71 @@
 /** @file Handles parsing for events related to switch-ins. */
 import { Protocol } from "@pkmn/protocol";
 import { SideID } from "@pkmn/types";
-import { expectEvents } from "../../../../../../battle/parser/inference";
-import { Event } from "../../../../../parser";
-import { verifyNext } from "../../../helpers";
-import { ParserContext } from "../../formats";
+import { BattleParserContext, consume, peek, unordered, verify } from
+    "../../../parser";
 import { Pokemon } from "../state/Pokemon";
 import { SwitchOptions } from "../state/Team";
-import { singleCaseEventInference, singleEventInference,
-    SingleEventInfPredicate } from "./helpers";
 
 /**
  * Parses multiple switch-ins, handling their effects after both sides have sent
  * out a switch-in.
  */
-export async function parseMultipleSwitchIns(ctx: ParserContext<"gen4">)
+export async function parseMultipleSwitchIns(ctx: BattleParserContext<"gen4">)
 {
-    const mons = (await expectEvents(ctx,
+    const mons =
+        (await unordered.expectUnordered(ctx,
             [switchEventInf("p1"), switchEventInf("p2")]))
-        .filter(mon => !!mon) as Pokemon[];
+        .filter(mon => mon) as Pokemon[];
     // on-switch/on-start effects after both initial |switch| events
-    await parseMultipleSwitchEffects(ctx, mons);
+    return await parseMultipleSwitchEffects(ctx, mons);
 }
 
 const switchEventInf = (side: SideID) =>
-    singleEventInference(
-        (event => event.args[0] === "switch" &&
-                Protocol.parsePokemonIdent(event.args[1]).player === side) as
-            SingleEventInfPredicate<Event<"|switch|">>,
-        parseSwitchEvent);
+    unordered.createUnorderedDeadline(
+        async function switchEventParser(ctx, accept)
+        {
+            const event = await peek(ctx);
+            if (event.args[0] !== "switch" ||
+                Protocol.parsePokemonIdent(event.args[1]).player !== side)
+            {
+                return;
+            }
+            accept();
+            return await parseSwitchEvent(ctx);
+        },
+        () => { throw new Error(`Expected |switch| event for '$[side}'`); });
 
 /** Parses switch effects for multiple switch-ins.  */
-async function parseMultipleSwitchEffects(ctx: ParserContext<"gen4">,
+async function parseMultipleSwitchEffects(ctx: BattleParserContext<"gen4">,
     mons: readonly Pokemon[])
 {
-    await expectEvents(ctx, mons.map(switchEffectsInf));
+    return await unordered.expectUnordered(ctx, mons.map(switchEffectsInf));
 }
 
 const switchEffectsInf = (mon: Pokemon) =>
-    singleCaseEventInference(
+    unordered.createUnorderedDeadline(
         async function turn1SwitchEffectsParser(ctx, accept)
         {
             return await parseSwitchEffects(ctx, accept, mon);
+        },
+        () =>
+        {
+            throw new Error(`Expected switch effects for ` +
+                `'${mon.team!.side}: ${mon.species}`);
         });
 
 /** Parses single `|switch|` event and its implications. */
-export async function parseSwitch(ctx: ParserContext<"gen4">,
-    accept: (() => void) | null)
+export async function parseSwitch(ctx: BattleParserContext<"gen4">)
 {
-    const event = await verifyNext(ctx, "|switch|");
-    const mon = await parseSwitchEvent(ctx, accept, event);
-    await parseSwitchEffects(ctx, /*accept*/ null, mon);
+    const mon = await parseSwitchEvent(ctx);
+    return await parseSwitchEffects(ctx, /*accept*/ null, mon);
 }
 
 /** Parses initial `|switch|` event and returns the switched-in Pokemon obj. */
-async function parseSwitchEvent(ctx: ParserContext<"gen4">,
-    accept: (() => void) | null, event: Event<"|switch|">): Promise<Pokemon>
+async function parseSwitchEvent(ctx: BattleParserContext<"gen4">):
+    Promise<Pokemon>
 {
+    const event = await verify(ctx, "|switch|");
     const [_, identStr, detailsStr, healthStr] = event.args;
 
     const ident = Protocol.parsePokemonIdent(identStr);
@@ -75,11 +84,12 @@ async function parseSwitchEvent(ctx: ParserContext<"gen4">,
         throw new Error(`Couldn't switch in '${identStr}': ` +
             `Team '${ident.player}' was too full (size=${team.size})`);
     }
+    await consume(ctx);
     return mon;
 }
 
 /** Parses any effects that should happen after a switch-in. */
-async function parseSwitchEffects(ctx: ParserContext<"gen4">,
+async function parseSwitchEffects(ctx: BattleParserContext<"gen4">,
     accept: (() => void) | null, mon: Pokemon)
 {
     // TODO

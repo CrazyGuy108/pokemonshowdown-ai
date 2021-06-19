@@ -1,19 +1,13 @@
 import { BattleAgent } from "../../agent";
+import { FormatType } from "../../formats";
 import { BattleParser, BattleParserContext } from "../BattleParser";
+import { UnorderedDeadline } from "../unordered/UnorderedDeadline";
+import { AcceptCallback } from "../unordered/UnorderedParser";
 import { SubInference } from "./SubInference";
 
 /**
- * Callback type for BattleParsers provided to the EventInference constructor.
- * @param inf The SubInference that ended up being chosen out of the ones given
- * when the EventInference was initially constructed.
- */
-export type AcceptCallback = (inf: SubInference) => void;
-
-/**
  * BattleParser type that EventInferences can wrap.
- * @template TEvent Game event type.
- * @template TState Battle state type.
- * @template TRState Readonly battle state type.
+ * @template T Format type.
  * @template TAgent Battle agent type.
  * @template TArgs BattleParser's additional parameter types.
  * @template TResult BattleParser's result type.
@@ -21,38 +15,44 @@ export type AcceptCallback = (inf: SubInference) => void;
  * reason for being able to parse an event. Must be called after verifying the
  * first event but before consuming it.
  */
-export type InferenceParser
+export type EventInfParser
 <
-    TEvent,
-    TState extends TRState,
-    TRState,
-    TAgent extends BattleAgent<TRState> = BattleAgent<TRState>,
+    T extends FormatType = FormatType,
+    TAgent extends BattleAgent<T> = BattleAgent<T>,
     TArgs extends unknown[] = unknown[],
     TResult = unknown
 > =
-    BattleParser<TEvent, TState, TRState, TAgent,
-        [accept: AcceptCallback, ...args: TArgs], TResult>;
+    BattleParser<T, TAgent, [accept: EventInfAcceptCallback, ...args: TArgs],
+        TResult>;
+
+/**
+ * Callback type for BattleParsers provided to the EventInference constructor.
+ * @param inf The SubInference that ended up being chosen out of the ones given
+ * when the EventInference was initially constructed.
+ */
+export type EventInfAcceptCallback = (inf: SubInference) => void;
 
 /**
  * Describes the different but related cases in which a single group of events
  * can be parsed.
- * @template TEvent Game event type.
- * @template TState Battle state type.
- * @template TRState Readonly battle state type.
+ *
+ * This is an extended version of UnorderedDeadline in order to handle cases
+ * where an event can cause one of several different but related inferences.
+ * @template T Format type.
  * @template TAgent Battle agent type.
  * @template TArgs BattleParser's additional parameter types.
  * @template TResult BattleParser's result type.
  */
 export class EventInference
 <
-    TEvent,
-    TState extends TRState,
-    TRState,
-    TAgent extends BattleAgent<TRState> = BattleAgent<TRState>,
+    T extends FormatType = FormatType,
+    TAgent extends BattleAgent<T> = BattleAgent<T>,
     TArgs extends unknown[] = unknown[],
     TResult = unknown
 >
+    implements UnorderedDeadline<T, TAgent, TResult>
 {
+    /** Args to supply to the wrapped parser. */
     private readonly innerParserArgs: TArgs;
 
     /**
@@ -66,39 +66,27 @@ export class EventInference
      */
     constructor(
         private readonly cases: ReadonlySet<SubInference>,
-        private readonly innerParser:
-            InferenceParser<TEvent, TState, TRState, TAgent, TArgs, TResult>,
+        private readonly innerParser: EventInfParser<T, TAgent, TArgs, TResult>,
         ...innerParserArgs: TArgs)
     {
         this.innerParserArgs = innerParserArgs;
     }
 
-    /**
-     * Attempts to parse some events.
-     * @param ctx Parser context.
-     * @returns The result from the wrapped BattleParser, as well as a boolean
-     * indicating whether this EventInference accepted the parsed events or it
-     * needs more/different events at a later time.
-     */
-    public async parse(
-        ctx: BattleParserContext<TEvent, TState, TRState, TAgent>):
-        Promise<{result: TResult, accepted: boolean}>
+    /** @override */
+    public async parse(ctx: BattleParserContext<T, TAgent>,
+        accept: AcceptCallback): Promise<TResult>
     {
-        let accepted = false;
         const result = await this.innerParser(ctx,
             inf =>
             {
                 this.accept(inf);
-                accepted = true;
+                accept();
             },
             ...this.innerParserArgs);
-        return {result, accepted};
+        return result;
     }
 
-    /**
-     * Indicates that this EventInference was never able to parse an event,
-     * meaning that none of its SubInferences held.
-     */
+    /** @override */
     public reject(): void
     {
         for (const subInf of this.cases) subInf.resolve(/*held*/ false);

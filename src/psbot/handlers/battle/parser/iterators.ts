@@ -1,20 +1,21 @@
-/** @file Defines iterator types used by {@link BattleParser BattleParsers}. */
+/** @file Defines iterator types used by BattleParsers. */
+import { Event } from "../../../parser";
 
 /**
  * Holds two corresponding iterators, one for sending BattleEvents and the
  * other for receiving them.
  */
-export class IteratorPair<TEvent = unknown>
+export class IteratorPair
 {
     /** Event iterator for receiving events in a BattleParserContext. */
-    public readonly eventIt: EventIterator<TEvent>;
+    public readonly eventIt: EventIterator;
     /** Battle iterator for sending events to the BattleParser. */
-    public readonly battleIt: BattleIterator<TEvent>;
+    public readonly battleIt: BattleIterator;
 
     private error: Error | null = null;
 
-    private nextEventPromise: Promise<TEvent | undefined> | null = null;
-    private nextEventRes: ((event?: TEvent) => void) | null = null;
+    private nextEventPromise: Promise<Event | undefined> | null = null;
+    private nextEventRes: ((event?: Event) => void) | null = null;
     private nextEventRej: ((reason?: any) => void) | null = null;
 
     private battlePromise: Promise<boolean | void> | null = null;
@@ -48,7 +49,7 @@ export class IteratorPair<TEvent = unknown>
     }
 
     /** Implementation for {@link EventIterator#next()}. */
-    private async eventNext(): Promise<IteratorResult<TEvent, void>>
+    private async eventNext(): Promise<IteratorResult<Event, void>>
     {
         // indicate that we're receiving the next event
         if (this.battleRes) this.battleRes();
@@ -68,7 +69,7 @@ export class IteratorPair<TEvent = unknown>
     }
 
     /** Implementation for {@link EventIterator#peek()}. */
-    private async eventPeek(): Promise<IteratorResult<TEvent, void>>
+    private async eventPeek(): Promise<IteratorResult<Event, void>>
     {
         // wait for a response and cache it, or get the cached response
         this.nextEventPromise ??= new Promise(
@@ -119,7 +120,7 @@ export class IteratorPair<TEvent = unknown>
     }
 
     /** Implementation for {@link BattleIterator#next()}. */
-    private async battleNext(event: TEvent): Promise<IteratorResult<void, void>>
+    private async battleNext(event: Event): Promise<IteratorResult<void, void>>
     {
         // send the next event
         if (this.nextEventRes) this.nextEventRes(event);
@@ -182,19 +183,18 @@ export class IteratorPair<TEvent = unknown>
  * Iterator for retreiving the next event. Also takes the latest BattleState for
  * logging.
  */
-export interface EventIterator<TEvent = unknown> extends
-    PeekableAsyncIterator<TEvent, void, void>
+export interface EventIterator extends PeekableAsyncIterator<Event, void, void>
 {
     /**
      * Gets the next event.
      * @override
      */
-    next(): Promise<IteratorResult<TEvent, void>>;
+    next(): Promise<IteratorResult<Event, void>>;
     /**
      * Peeks at the next event.
      * @override
      */
-    peek(): Promise<IteratorResult<TEvent, void>>;
+    peek(): Promise<IteratorResult<Event, void>>;
     /**
      * Finishes the iterator. If this is connected to a BattleIterator, the
      * `#return()` call will be propagated to it.
@@ -214,14 +214,13 @@ export interface EventIterator<TEvent = unknown> extends
  * Iterator for sending the next event to the BattleParser. Also outputs the
  * latest BattleState for logging.
  */
-export interface BattleIterator<TEvent = unknown> extends
-    AsyncIterator<void, void, TEvent>
+export interface BattleIterator extends AsyncIterator<void, void, Event>
 {
     /**
      * Sends the next event. Once consumed, the latest BattleState is returned.
      * @override
      */
-    next(event: TEvent): Promise<IteratorResult<void, void>>;
+    next(event: Event): Promise<IteratorResult<void, void>>;
     /**
      * Finishes the iterator. If this is connected to an EventIterator, the
      * `#return()` call will be propagated to it.
@@ -237,7 +236,7 @@ export interface BattleIterator<TEvent = unknown> extends
 }
 
 /** AsyncIterator with peek operation. */
-export interface PeekableAsyncIterator<T, TReturn = any, TNext = unknown>
+interface PeekableAsyncIterator<T, TReturn = any, TNext = unknown>
     extends AsyncIterator<T, TReturn, TNext>
 {
     /** Gets the next T/TReturn without consuming it. */

@@ -1,33 +1,27 @@
 /** @file Defines the core BattleParser function type. */
-import { Logger } from "../../Logger";
+import { Logger } from "../../../../Logger";
 import { BattleAgent, Choice } from "../agent";
+import { FormatType, State } from "../formats";
 import { EventIterator } from "./iterators";
 
 /**
  * Function type for parsing battle events.
- * @template TEvent Game event type.
- * @template TState Battle state type.
- * @template TRState Readonly battle state type.
+ * @template T Format type.
  * @template TAgent Battle agent type.
  * @template TArgs Additional parameter types.
  * @template TResult Result type.
  * @param ctx General args.
- * @param accept Callback for when the parser commits to parsing, just before
- * consuming the first event from the {@link EventIterator} stream.
  * @param args Additional args.
  * @returns A custom result value to be handled by the caller.
  */
 export type BattleParser
 <
-    TEvent,
-    TState extends TRState,
-    TRState,
-    TAgent extends BattleAgent<TRState> = BattleAgent<TRState>,
+    T extends FormatType = FormatType,
+    TAgent extends BattleAgent<T> = BattleAgent<T>,
     TArgs extends unknown[] = unknown[],
-    TResult = unknown
+    TResult = unknown,
 > =
-    (ctx: BattleParserContext<TEvent, TState, TRState, TAgent>,
-        accept: (() => void) | null, ...args: TArgs) => Promise<TResult>;
+    (ctx: BattleParserContext<T, TAgent>, ...args: TArgs) => Promise<TResult>;
 
 /**
  * Context container needed to call a BattleParser.
@@ -38,22 +32,20 @@ export type BattleParser
  */
 export interface BattleParserContext
 <
-    TEvent,
-    TState extends TRState,
-    TRState,
-    TAgent extends BattleAgent<TRState> = BattleAgent<TRState>
+    T extends FormatType = FormatType,
+    TAgent extends BattleAgent<T> = BattleAgent<T>
 >
 {
     /** Function that makes the decisions for this battle. */
     readonly agent: TAgent;
     /** Iterator for getting the next event.  */
-    readonly iter: EventIterator<TEvent>;
+    readonly iter: EventIterator;
     /** Logger object. */
     readonly logger: Logger;
     /** Function for sending the BattleAgent's Choice to the game. */
     readonly sender: ChoiceSender;
     /** Battle state tracker. */
-    readonly state: TState;
+    readonly state: State<T>;
 }
 
 /** Function type for sending a Choice to the game. */

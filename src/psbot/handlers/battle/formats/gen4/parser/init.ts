@@ -1,27 +1,22 @@
 /**
- * @file Specifies how events are parsed during the initialization of a battle
- * room.
+ * @file Specifies how events are parsed during the initialization phase of a
+ * battle.
  */
 import { Protocol } from "@pkmn/protocol";
 import { GenerationNum, StatID } from "@pkmn/types";
-import { consume, peek } from "../../../../../../battle/parser";
-import { expectEvents } from "../../../../../../battle/parser/inference";
-import { Event } from "../../../../../parser";
-import { ParserContext } from "../../formats";
+import { BattleParserContext, consume, peek, unordered } from "../../../parser";
 import { HPType } from "../dex";
 import { BattleState } from "../state";
 import { TeamRevealOptions } from "../state/Team";
-import { singleCaseEventInference, singleEventInference,
-    SingleEventInfPredicate } from "./helpers";
 
 /**
  * Parses the initialization step of a battle up to but not including the first
  * switch-ins.
  */
-export async function init(ctx: ParserContext<"gen4">)
+export async function init(ctx: BattleParserContext<"gen4">)
 {
     // initialization events
-    await expectEvents(ctx,
+    await unordered.expectUnordered(ctx,
     [
         ignoredUpToStart(), initBattle(), gameType(), player(1),
         request(/*first*/ true), player(2), teamSize(1), teamSize(2), gen(4),
@@ -33,7 +28,7 @@ export async function init(ctx: ParserContext<"gen4">)
 
 /** Consumes all irrelevant events up to the final `|start` event. */
 const ignoredUpToStart = () =>
-    singleCaseEventInference(
+    unordered.createUnorderedDeadline(
         async function ignoredEventsParser(ctx, accept)
         {
             const event = await peek(ctx);
@@ -55,81 +50,110 @@ const ignoredUpToStart = () =>
         () => { throw new Error("Expected |start event"); });
 
 const initBattle = () =>
-    singleEventInference(
-        (event => event.args[0] === "init") as
-            SingleEventInfPredicate<Event<"|init|">>,
-        async function initBattleParser(ctx, event)
+    unordered.createUnorderedDeadline(
+        async function initBattleParser(ctx, accept)
         {
+            const event = await peek(ctx);
+            if (event.args[0] !== "init") return;
+            accept();
+
             if (event.args[1] !== "battle")
             {
                 throw new Error("Expected room type 'battle' but got " +
                     `'${event.args[1]}'`)
             }
+            await consume(ctx);
         }
         // note: this message isn't shown if we're not in a battle room, e.g.
-        //  when using the sim's battle stream api, hence why onIgnored is empty
+        //  when using the sim's battle stream api, hence why reject is empty
         );
 
 const gameType = () =>
-    singleEventInference(
-        (event => event.args[0] === "gametype") as
-            SingleEventInfPredicate<Event<"|gametype|">>,
-        async function gameTypeParser(_ctx, event)
+    unordered.createUnorderedDeadline(
+        async function gameTypeParser(ctx, accept)
         {
+            const event = await peek(ctx);
+            if (event.args[0] !== "gametype") return;
+            accept();
+
             if (event.args[1] !== "singles")
             {
                 throw new Error("Expected game type 'singles' but got " +
                     `'${event.args[1]}'`);
             }
+            await consume(ctx);
         },
-        () => { throw new Error("Expected |gametype| event"); });
+        () => { throw new Error("Expected |gametype|singles event"); });
 
 const player = (num: 1 | 2) =>
-    singleEventInference(
-        (event => event.args[0] === "player" &&
-                event.args[1] === `p${num}` as const) as
-            SingleEventInfPredicate<Event<"|player|">>,
-        async function playerParser(ctx, event)
+    unordered.createUnorderedDeadline(
+        async function playerParser(ctx, accept)
         {
-            if (ctx.state.username !== event.args[2]) return;
-            ctx.state.ourSide = event.args[1];
+            const event = await peek(ctx);
+            if (event.args[0] !== "player" ||
+                event.args[1] !== `p${num}` as const)
+            {
+                return;
+            }
+            accept();
+
+            if (ctx.state.username === event.args[2])
+            {
+                ctx.state.ourSide = event.args[1];
+            }
+            await consume(ctx);
         },
         () => { throw new Error(`Expected |player|p${num}| event`); });
 
 const request = (first?: boolean) =>
-    singleEventInference(
-        (event => event.args[0] === "request") as
-            SingleEventInfPredicate<Event<"|request|">>,
-        async function requestParser(ctx, event)
+    unordered.createUnorderedDeadline(
+        async function requestParser(ctx, accept)
         {
+            const event = await peek(ctx);
+            if (event.args[0] !== "request") return;
+            accept();
+
             // only the first |request| msg can be used to initialize the
             //  client's team
-            if (!first) return;
-            initRequest(ctx.state, Protocol.parseRequest(event.args[1]))
+            if (first)
+            {
+                initRequest(ctx.state, Protocol.parseRequest(event.args[1]))
+            }
+            await consume(ctx);
         },
         () => { throw new Error("Expected |request| event"); });
 
 const teamSize = (num: 1 | 2) =>
-    singleEventInference(
-        (event => event.args[0] === "teamsize" &&
-                event.args[1] === `p${num}` as const) as
-            SingleEventInfPredicate<Event<"|teamsize|">>,
-        async function teamSizeParser(ctx, event)
+    unordered.createUnorderedDeadline(
+        async function teamSizeParser(ctx, accept)
         {
+            const event = await peek(ctx);
+            if (event.args[0] !== "teamsize" ||
+                event.args[1] !== `p${num}` as const)
+            {
+                return;
+            }
+            accept();
+
             // client's side should be initialized by the first |request| msg
             const [_, sideId, sizeStr] = event.args;
-            if (ctx.state.ourSide === sideId) return;
-            const size = Number(sizeStr);
-            ctx.state.getTeam(sideId).size = size;
+            if (ctx.state.ourSide !== sideId)
+            {
+                const size = Number(sizeStr);
+                ctx.state.getTeam(sideId).size = size;
+            }
+            await consume(ctx);
         },
         () => { throw new Error(`Expected |teamsize|p${num}| event`); });
 
 const gen = (num: GenerationNum) =>
-    singleEventInference(
-        (event => event.args[0] === "gen") as
-            SingleEventInfPredicate<Event<"|gen|">>,
-        async function genParser(ctx, event)
+    unordered.createUnorderedDeadline(
+        async function genParser(ctx, accept)
         {
+            const event = await peek(ctx);
+            if (event.args[0] !== "gen") return;
+            accept();
+
             const [_, genNum] = event.args;
             if (num !== genNum)
             {
@@ -137,26 +161,33 @@ const gen = (num: GenerationNum) =>
                     `|gen|${genNum}`);
             }
             // TODO: record gen?
+            await consume(ctx);
         });
 
 const tier = () =>
-    singleEventInference(
-        (event => event.args[0] === "tier") as
-            SingleEventInfPredicate<Event<"|tier|">>,
-        async function tierParser(ctx, event)
+    unordered.createUnorderedDeadline(
+        async function tierParser(ctx, accept)
         {
+            const event = await peek(ctx);
+            if (event.args[0] !== "tier") return;
+            accept();
+
             // TODO: record tier?
+            await consume(ctx);
         });
 
 const rule = () =>
-    singleEventInference(
-        (event => event.args[0] === "rule") as
-            SingleEventInfPredicate<Event<"|rule|">>,
-        async function ruleParser(ctx, event)
+    unordered.createUnorderedDeadline(
+        async function ruleParser(ctx, accept)
         {
+            const event = await peek(ctx);
+            if (event.args[0] !== "rule") return;
+            accept();
+
             // TODO: record rules/mods?
             // recursion in order to parse multiple rules
-            await expectEvents(ctx, [rule()]);
+            await consume(ctx);
+            await unordered.expectUnordered(ctx, [rule()]);
         });
 
 /**
