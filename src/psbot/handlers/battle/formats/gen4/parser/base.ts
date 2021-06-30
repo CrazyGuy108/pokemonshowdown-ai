@@ -366,12 +366,13 @@ const handlers =
         const event = await verify(ctx,
             start ? "|-fieldstart|" : "|-fieldend|");
         const [_, effectStr] = event.args;
-        switch (effectStr)
+        const effect = Protocol.parseEffect(effectStr, s => toIdName(s.trim()));
+        switch (effect.name)
         {
-            case "move: Gravity":
+            case "gravity":
                 ctx.state.status.gravity[start ? "start" : "end"]();
                 break;
-            case "move: Trick Room":
+            case "trickroom":
                 ctx.state.status.trickRoom[start ? "start" : "end"]();
                 break;
         }
@@ -385,46 +386,41 @@ const handlers =
     {
         return await handlers.handleSideCondition(ctx, /*start*/ false);
     },
-    async function handleSideCondition(ctx: BattleParserContext<"gen4">,
+    async handleSideCondition(ctx: BattleParserContext<"gen4">,
         start: boolean)
     {
         const event = await verify(ctx, start ? "|-sidestart|" : "|-sideend|");
-        const [_, identStr, effect] = event.args;
-        const ident = Protocol.parsePokemonIdent(identStr);
-        const ts = ctx.state.getTeam(ident.player).status;
-        switch (effect)
+        const [_, sideStr, effectStr] = event.args;
+        // parsePokemonIdent supports side identifiers
+        const side = Protocol.parsePokemonIdent(
+            sideStr as any as Protocol.PokemonIdent).player;
+        const effect = Protocol.parseEffect(effectStr, s => toIdName(s.trim()));
+        const ts = ctx.state.getTeam(side).status;
+        switch (effect.name)
         {
-            case "move: Light Screen": case "Light Screen":
+            case "lightscreen":
                 // TODO: source pokemon param
                 if (start) ts.lightScreen.start();
-                else ts.lightScreen.end();
+                else ts.lightScreen.reset();
                 break;
-            case "move: Reflect": case "Reflect":
+            case "reflect":
                 // TODO: source pokemon param
                 if (start) ts.reflect.start();
-                else ts.reflect.end();
+                else ts.reflect.reset();
                 break;
-            case "move: Lucky Chant": case "Lucky Chant":
-                ts.luckyChant[start ? "start" : "end"]();
-                break;
-            case "move: Mist": case "Mist":
-                ts.mist[start ? "start" : "end"]();
-                break;
-            case "move: Safeguard": case "Safeguard":
-                ts.safeguard[start ? "start" : "end"]();
-                break;
-            case "move: Spikes": case "Spikes":
+            case "luckychant": ts.luckyChant[start ? "start" : "end"](); break;
+            case "mist": ts.mist[start ? "start" : "end"](); break;
+            case "safeguard": ts.safeguard[start ? "start" : "end"](); break;
+            case "spikes":
                 if (start) ++ts.spikes;
                 else ts.spikes = 0;
                 break;
-            case "move: Stealth Rock": case "Stealth Rock":
+            case "stealthrock":
                 if (start) ++ts.stealthRock;
                 else ts.stealthRock = 0;
                 break;
-            case "move: Tailwind": case "Tailwind":
-                ts.tailwind[start ? "start" : "end"]();
-                break;
-            case "move: Toxic Spikes": case "Toxic Spikes":
+            case "tailwind": ts.tailwind[start ? "start" : "end"](); break;
+            case "toxicspikes":
                 if (start) ++ts.toxicSpikes;
                 else ts.toxicSpikes = 0;
                 break;
@@ -472,7 +468,7 @@ const handlers =
         const identSource = Protocol.parsePokemonIdent(identSourceStr);
         const identTarget = Protocol.parsePokemonIdent(identTargetStr);
         ctx.state.getTeam(identSource.player).active.transform(
-            ctx.state.getTeam(idenetTarget.player).active);
+            ctx.state.getTeam(identTarget.player).active);
         await consume(ctx);
     },
     async "|-mega|"(ctx: BattleParserContext<"gen4">)
@@ -558,27 +554,17 @@ const handlers =
     async "|-singleturn|"(ctx: BattleParserContext<"gen4">)
     {
         const event = await verify(ctx, "|-singleturn|");
-        const [_, identStr, effect] = event.args;
+        const [_, identStr, effectStr] = event.args;
         const ident = Protocol.parsePokemonIdent(identStr);
+        const effect = Protocol.parseEffect(effectStr, s => toIdName(s.trim()));
         const v = ctx.state.getTeam(ident.player).active.volatile;
-        switch (effect)
+        switch (effect.name)
         {
-            case "move: Endure": case "Endure":
-            case "move: Protect": case "Protect":
-                v.stall(/*flag*/ true);
-                break;
-            case "move: Focus Punch": case "Focus Punch":
-                v.focus = true;
-                break;
-            case "move: Magic Coat": case "Magic Coat":
-                v.magicCoat = true;
-                break;
-            case "move: Roost": case "Roost":
-                v.roost = true;
-                break;
-            case "move: Snatch": case "Snatch":
-                v.roost = true;
-                break;
+            case "endure": case "protect": v.stall(/*flag*/ true); break;
+            case "focuspunch": v.focus = true; break;
+            case "magiccoat": v.magicCoat = true; break;
+            case "roost": v.roost = true; break;
+            case "snatch": v.roost = true; break;
         }
         await consume(ctx);
     },
