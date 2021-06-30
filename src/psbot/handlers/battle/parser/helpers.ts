@@ -228,30 +228,52 @@ export async function tryPeek
 }
 
 /**
+ * Peeks and verifies the next event according to the given event type. Returns
+ * null if there are no events left or if the event type doesn't match.
+ * @template TName Event type identifier.
+ * @template T Format type.
+ * @param ctx Parser context.
+ * @param expectedKey Expected event type.
+ */
+export async function tryVerify
+<
+    TName extends Protocol.ArgName,
+    T extends FormatType = FormatType
+>(
+    ctx: BattleParserContext<T>, ...expectedKeys: TName[]):
+    Promise<Event<TName> | null>
+{
+    const event = await tryPeek(ctx);
+    if (!event) return null;
+
+    const key = Protocol.key(event.args);
+    if (!key || !expectedKeys.includes(key as TName)) return null;
+    return event as Event<TName>;
+}
+
+/**
  * Peeks and verifies the next event according to the given event type. Throws
  * if there are no events left or if the event type doesn't match.
  * @template TName Event type identifier.
  * @template T Format type.
- * @template TAgent Battle agent type.
  * @param ctx Parser context.
  * @param expectedKey Expected event type.
  */
 export async function verify
 <
     TName extends Protocol.ArgName,
-    T extends FormatType = FormatType,
-    TAgent extends BattleAgent<T> = BattleAgent<T>
+    T extends FormatType = FormatType
 >(
-    ctx: BattleParserContext<T, TAgent>,
-    expectedKey: TName): Promise<Event<TName>>
+    ctx: BattleParserContext<T>, ...expectedKeys: TName[]):
+    Promise<Event<TName>>
 {
     const event = await peek(ctx);
 
     const key = Protocol.key(event.args);
-    if (key !== expectedKey)
+    if (!key || !expectedKeys.includes(key as TName))
     {
-        throw new Error(`Invalid event: Expected type '${expectedKey}' but ` +
-            `got '${key}'`)
+        throw new Error("Invalid event: Expected type " +
+            `[${expectedKeys.map(k => `'${k}'`).join(", ")}] but got '${key}'`);
     }
     return event as Event<TName>;
 }

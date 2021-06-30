@@ -18,36 +18,13 @@ export async function init(ctx: BattleParserContext<"gen4">)
     // initialization events
     await unordered.expectUnordered(ctx,
     [
-        ignoredUpToStart(), initBattle(), gameType(), player(1),
-        request(/*first*/ true), player(2), teamSize(1), teamSize(2), gen(4),
-        tier()
+        initBattle(), gameType(), player(1), request(/*first*/ true), player(2),
+        teamSize(1), teamSize(2), gen(4), tier()
         // TODO: |rated|, |seed|, |split|, |teampreview|, |clearpoke|, |poke|,
         //  |rule|
-    ]);
+    ],
+        parseIgnoredUpToStart);
 }
-
-/** Consumes all irrelevant events up to the final `|start` event. */
-const ignoredUpToStart = () =>
-    unordered.createUnorderedDeadline(
-        async function ignoredEventsParser(ctx, accept)
-        {
-            const event = await peek(ctx);
-            switch (event.args[0])
-            {
-                case "init": case "gametype": case "player": case "request":
-                case "player": case "teamsize": case "gen": case "tier":
-                    break;
-                case "start":
-                    // initialization phase ends on the |start event
-                    accept();
-                    // fallthrough
-                default:
-                    // consume event but don't accept it so the parser can be
-                    //  called again later to consume another irrelevant event
-                    await consume(ctx);
-            }
-        },
-        () => { throw new Error("Expected |start event"); });
 
 const initBattle = () =>
     unordered.createUnorderedDeadline(
@@ -64,8 +41,9 @@ const initBattle = () =>
             }
             await consume(ctx);
         }
-        // note: this message isn't shown if we're not in a battle room, e.g.
-        //  when using the sim's battle stream api, hence why reject is empty
+        // note: don't specify reject callback here since this message isn't
+        //  shown if we're not in a battle room, e.g. when using the sim's
+        //  battle stream api
         );
 
 const gameType = () =>
@@ -277,5 +255,27 @@ function initRequest(state: BattleState, req: Protocol.Request)
 
         mon.baseTraits.ability.narrow(reqMon.baseAbility)
         mon.setItem(reqMon.item);
+    }
+}
+
+/** Consumes all irrelevant events up to the final `|start` event. */
+async function parseIgnoredUpToStart(ctx: BattleParserContext<"gen4">,
+    accept: () => void): Promise<void>
+{
+    const event = await peek(ctx);
+    switch (event.args[0])
+    {
+        case "init": case "gametype": case "player": case "request":
+        case "player": case "teamsize": case "gen": case "tier":
+            break;
+        case "start":
+            // initialization phase ends on the |start event
+            // TODO: what about team preview?
+            accept();
+            // fallthrough
+        default:
+            // consume event but don't accept it so the parser can be called
+            //  again later to consume another irrelevant event
+            await consume(ctx);
     }
 }

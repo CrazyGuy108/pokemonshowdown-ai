@@ -87,7 +87,7 @@ export class ItemTempStatus<TStatusType extends string> implements
      * doesn't apply if this object has only one type of status.
      * @param infinite Whether this status is infinite.
      */
-    public start(source: Pokemon | null, type = this.defaultStatus,
+    public start(source: Pokemon | null = null, type = this.defaultStatus,
         infinite = false): void
     {
         if (type === "none")

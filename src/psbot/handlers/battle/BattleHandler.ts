@@ -1,11 +1,12 @@
 import { Protocol } from "@pkmn/protocol";
-import { BattleIterator, ChoiceSender, SenderResult } from
-    "../../../battle/parser";
 import { Logger } from "../../../Logger";
 import { Event } from "../../parser";
 import { Sender } from "../../PSBot";
 import { RoomHandler } from "../RoomHandler";
+import { BattleAgent } from "./agent";
 import * as formats from "./formats";
+import { BattleIterator, BattleParser, ChoiceSender, SenderResult,
+    startBattleParser, StartBattleParserArgs } from "./parser";
 
 /**
  * Args for BattleHandler constructor.
@@ -15,7 +16,7 @@ import * as formats from "./formats";
 export interface BattleHandlerArgs
 <
     TFormatType extends formats.FormatType = formats.FormatType,
-    TAgent extends formats.Agent<TFormatType> = formats.Agent<TFormatType>
+    TAgent extends BattleAgent<TFormatType> = BattleAgent<TFormatType>
 >
 {
     /** Battle format for this room. */
@@ -26,7 +27,7 @@ export interface BattleHandlerArgs
      * Function for building up a battle state for the BattleAgent. Defaults to
      * format default.
      */
-    readonly parser?: formats.Parser<TFormatType, TAgent, [], void>;
+    readonly parser?: BattleParser<TFormatType, TAgent, [], void>;
     /** Function for deciding what to do. */
     readonly agent: TAgent;
     /** Used for sending messages to the assigned server room. */
@@ -43,7 +44,7 @@ export interface BattleHandlerArgs
 export class BattleHandler
 <
     TFormatType extends formats.FormatType = formats.FormatType,
-    TAgent extends formats.Agent<TFormatType> = formats.Agent<TFormatType>
+    TAgent extends BattleAgent<TFormatType> = BattleAgent<TFormatType>
 >
     implements RoomHandler
 {
@@ -72,7 +73,7 @@ export class BattleHandler
     private unavailableChoice: "move" | "switch" | null = null;
 
     /** Iterator for sending PS Events to the BattleParser. */
-    private readonly iter: BattleIterator<Event>;
+    private readonly iter: BattleIterator;
     /** Promise for the entire BattleParser to finish. */
     private readonly finishPromise: Promise<void>;
 
@@ -99,13 +100,13 @@ export class BattleHandler
                 })
                 .finally(() => this.choiceSenderRes = null);
 
-        const cfg: formats.StartParserArgs<TFormatType, TAgent> =
+        const cfg: StartBattleParserArgs<TFormatType, TAgent> =
         {
             agent, logger: this.logger, sender: choiceSender,
             getState: () => new formats.state[format](this.username)
         };
 
-        const {iter, finish} = formats.startParser(cfg,
+        const {iter, finish} = startBattleParser(cfg,
                 // TODO: how to resolve TAgent and Agent<TFormatType, any>?
                 parser ?? formats.parser[format]);
         this.iter = iter;

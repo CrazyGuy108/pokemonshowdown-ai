@@ -23,7 +23,4 @@ export type UnorderedParser
     TArgs extends unknown[] = unknown[],
     TResult = unknown
 > =
-    BattleParser<T, TAgent, [accept: AcceptCallback, ...args: TArgs], TResult>;
-
-/** Callback type for {@link UnorderedParser}'s `accept` param. */
-export type AcceptCallback = () => void;
+    BattleParser<T, TAgent, [accept: () => void, ...args: TArgs], TResult>;

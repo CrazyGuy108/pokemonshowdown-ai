@@ -1,3 +1,4 @@
+import { SideID } from "@pkmn/sim";
 import * as dex from "../dex";
 import { HP, ReadonlyHP } from "./HP";
 import { MajorStatusCounter, ReadonlyMajorStatusCounter } from
@@ -136,8 +137,8 @@ export class Pokemon implements ReadonlyPokemon
      * Does a form change for this Pokemon.
      * @param species The species to change into.
      * @param level New form's level for stat calcs.
-     * @param perm Whether this is permanent. Default false. Can be overridden
-     * to false by `VolatileStatus#transformed`.
+     * @param perm Whether this is a permanent form change. Default false. Can
+     * be overridden to false if `#volatile.transformed` is true.
      */
     public formChange(species: string, level: number, perm = false): void
     {
@@ -151,11 +152,11 @@ export class Pokemon implements ReadonlyPokemon
         {
             // completely diverge from original base traits
             // TODO: what changes stay the same?
-            // TODO: how to recover stats for "us" case? need evs/ivs/etc
+            // TODO: how to recover stat ranges? need evs/ivs/etc
             this._baseTraits = PokemonTraits.base(data, level);
             this.volatile.overrideTraits = this._baseTraits.volatile();
         }
-        // diverge from original override traits
+        // completely diverge from current override traits
         else this.volatile.overrideTraits = PokemonTraits.base(data, level);
     }
 
@@ -465,19 +466,14 @@ export class Pokemon implements ReadonlyPokemon
         // toxic counter resets on switch
         if (mon?.majorStatus.current === "tox") mon.majorStatus.resetCounter();
 
-        // clear mirrorMove
-        const state = mon?.team?.state;
-        if (state)
+        // clear mirrorMove entries for the mon being switched out
+        const teams = mon?.team?.state?.teams ?? {};
+        for (const sideId in teams)
         {
-            // TODO: go through each active mon and set mirrorMove[this side] = null
-            if (state.teams.us.active?.active)
-            {
-                state.teams.us.active.volatile.mirrorMove = null;
-            }
-            if (state.teams.them.active?.active)
-            {
-                state.teams.them.active.volatile.mirrorMove = null;
-            }
+            if (!teams.hasOwnProperty(sideId)) continue;
+            const team = teams[sideId as SideID];
+            if (!team) continue;
+            team.active.volatile.mirrorMove = null;
         }
 
         // switch in new mon
