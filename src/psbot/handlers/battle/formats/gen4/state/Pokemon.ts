@@ -224,7 +224,7 @@ export class Pokemon implements ReadonlyPokemon
      * Indicates that an item was just removed from this Pokemon.
      * @param consumed False if the item was removed or transferred. If the item
      * was consumed (i.e., it can be brought back using the Recycle move), this
-     * is set to the item's name, or just true if the item's name is unknown.
+     * is set either to the item's name or just true if the item is unknown.
      */
     public removeItem(consumed: string | boolean): void
     {

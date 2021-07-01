@@ -24,24 +24,10 @@ async function parseTurn1(ctx: BattleParserContext<"gen4">)
 async function parseTurn(ctx: BattleParserContext<"gen4">, num: number):
     Promise<boolean>
 {
-    // alternate switch/move expects for each side
-        // only one switch/move though, so do nested unordered deadline
-
+    // TODO: ignored events
     await parsePlayerActions(ctx);
+    // TODO: end of turn effects
 
-    // NOTE: need early return whenever game-over is detected
-    // should ignore/skip done events and other unnecessary stuff
-    // (done)
-    // 2 move/switch (including pre-effects)
-        // all effects/implications, including self-switch
-        // TODO: need all events that can happen first
-    // (done)
-    // end of turn effects
-    // upkeep
-    // optional switch-in:
-        // (done)
-        // switch (including pre-effects)
-        // more optional switch-ins
     await parseTurnEvent(ctx, num);
     return false;
 }

@@ -99,13 +99,13 @@ export type EventHandlerMap
 
 /**
  * Creates a BattleParser that dispatches to an appropriate event handler using
- * the given map, or can return null if no handler is defined for it.
+ * the given map, or can return null if no events left or no handler is defined
+ * for it.
  * @template T Format type.
  * @template TAgent Battle agent type.
  * @template TArgs Additional parameter types.
  * @template TResult Result type.
  * @param handlers Map of event handlers.
- * @param getKey Function for extracting the TEventName from the TEvent.
  */
 export function createDispatcher
 <
