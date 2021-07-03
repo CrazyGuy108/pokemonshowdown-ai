@@ -1,5 +1,6 @@
 import { BattleParserContext, consume, verify } from "../../../parser";
 import { parsePlayerActions } from "./action";
+import { consumeIgnoredEvents } from "./base";
 import { parseMultipleSwitchIns } from "./switch";
 
 /** Parses each turn of the battle until game over.  */
@@ -10,7 +11,7 @@ export async function turnLoop(ctx: BattleParserContext<"gen4">)
 
     // actual turn loop
     let num = 1;
-    while (await parseTurn(ctx, ++num));
+    while (!await parseTurn(ctx, ++num));
 }
 
 /** Parses the first turn and its initial switch-ins. */
@@ -24,8 +25,11 @@ async function parseTurn1(ctx: BattleParserContext<"gen4">)
 async function parseTurn(ctx: BattleParserContext<"gen4">, num: number):
     Promise<boolean>
 {
-    // TODO: ignored events
+    // TODO: game-over detection
+    await consumeIgnoredEvents(ctx);
     await parsePlayerActions(ctx);
+
+    await consumeIgnoredEvents(ctx);
     // TODO: end of turn effects
 
     await parseTurnEvent(ctx, num);
