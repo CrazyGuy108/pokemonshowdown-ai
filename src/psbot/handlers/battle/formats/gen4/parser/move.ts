@@ -62,18 +62,19 @@ async function parseInterception(ctx: BattleParserContext<"gen4">,
     const event = await tryVerify(ctx, "|-activate|");
     if (!event) return;
 
-    const [_, identStr, effect] = event.args;
+    const [_, identStr, effectStr] = event.args;
     if (!identStr) return;
     const ident = Protocol.parsePokemonIdent(identStr);
     if (ident.player !== intercept) return;
+    const mon = ctx.state.getTeam(ident.player).active;
 
-    if (!effect.startsWith("move: ")) return;
-    const moveName = effect.substr("move: ".length);
-    const moveId = toIdName(moveName);
-    const move = dex.getMove(moveId);
-    if (!move || !move.data.flags?.interceptSwitch) return;
+    const effect = Protocol.parseEffect(effectStr, toIdName);
+    if (effect.type !== "move") return;
+    const move = dex.getMove(effect.name);
+    if (!move?.data.flags?.interceptSwitch) return;
 
     accept();
+    mon.moveset.reveal(move.data.name);
     await consume(ctx);
     return move;
 }
