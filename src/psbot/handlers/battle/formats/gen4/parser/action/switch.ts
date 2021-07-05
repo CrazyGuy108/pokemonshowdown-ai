@@ -1,19 +1,19 @@
 /** @file Handles parsing for events related to switch-ins. */
 import { Protocol } from "@pkmn/protocol";
 import { SideID } from "@pkmn/types";
-import { BattleParserContext, consume, unordered, verify } from
-    "../../../parser";
-import { Pokemon } from "../state/Pokemon";
-import { SwitchOptions } from "../state/Team";
-import { parseMoveAction } from "./move";
+import { Event } from "../../../../../../parser";
+import { BattleParserContext, consume, tryVerify, unordered, verify } from
+    "../../../../parser";
+import { Pokemon } from "../../state/Pokemon";
+import { SwitchOptions } from "../../state/Team";
+import { ActionResult } from "./action";
+import { interceptSwitch, MoveResult } from "./move";
 
-/** Result of {@link switchAction} and {@link parseSelfSwitch}. */
-export interface SwitchActionResult
+/** Result of {@link switchAction} and {@link selfSwitch}. */
+export interface SwitchActionResult extends ActionResult
 {
     /** Pokemon that was switched in, or undefined if not accepted. */
     mon?: Pokemon;
-    /** Optional Pokemon reference that interrupted the switch-in. */
-    intercepted?: SideID;
 }
 
 /**
@@ -24,7 +24,18 @@ export interface SwitchActionResult
 export function switchAction(side: SideID, reject?: () => void)
 {
     return unordered.createUnorderedDeadline(
-        (ctx, accept) => parseSwitchAction(ctx, side, accept), reject);
+        (ctx, accept) => switchActionImpl(ctx, side, accept), reject);
+}
+
+/**
+ * Parses a switch-in action by self-switch. Includes effects that could happen
+ * before the main `|switch|` event.
+ * @param side Player that should be making the switch action.
+ */
+export async function selfSwitch(ctx: BattleParserContext<"gen4">,
+    side: SideID): Promise<SwitchActionResult>
+{
+    return await switchActionImpl(ctx, side);
 }
 
 /**
@@ -32,50 +43,51 @@ export function switchAction(side: SideID, reject?: () => void)
  * out a switch-in.
  * @returns The Pokemon that were switched in.
  */
-export async function parseMultipleSwitchIns(ctx: BattleParserContext<"gen4">):
+export async function multipleSwitchIns(ctx: BattleParserContext<"gen4">):
     Promise<Pokemon[]>
 {
     const mons =
-        (await unordered.expectUnordered(ctx,
-            [switchEventInf("p1"), switchEventInf("p2")]))
-        .filter(mon => mon) as Pokemon[];
-    await parseMultipleSwitchEffects(ctx, mons);
+        (await unordered.all(ctx,
+                (["p1", "p2"] as SideID[]).map(unorderedSwitchEvent)))
+            .filter(mon => mon) as Pokemon[];
+    await multipleSwitchEffects(ctx, mons);
     return mons;
 }
 
-const switchEventInf = (side: SideID) =>
+const unorderedSwitchEvent = (side: SideID) =>
     unordered.createUnorderedDeadline(
-        (ctx, accept) => parseSwitchEvent(ctx, side, accept),
+        (ctx, accept) => switchEvent(ctx, side, accept),
         () => { throw new Error(`Expected |switch| event for '${side}'`); });
 
 /** Parses switch effects for multiple switch-ins.  */
-async function parseMultipleSwitchEffects(ctx: BattleParserContext<"gen4">,
+async function multipleSwitchEffects(ctx: BattleParserContext<"gen4">,
     mons: readonly Pokemon[])
 {
-    return await unordered.expectUnordered(ctx, mons.map(switchEffectsInf));
+    return await unordered.all(ctx, mons.map(unorderedSwitchEffects));
 }
 
-const switchEffectsInf = (mon: Pokemon) =>
+const unorderedSwitchEffects = (mon: Pokemon) =>
     unordered.createUnorderedDeadline(
-        async function turn1SwitchEffectsParser(ctx, accept)
+        async function multipleSwitchEffectsParser(ctx, accept)
         {
-            return await parseSwitchEffects(ctx, mon, accept);
+            return await switchEffects(ctx, mon, accept);
         },
-        function turn1SwitchEffectsReject()
+        function multipleSwitchEffectsReject()
         {
             throw new Error(`Expected switch effects for ` +
                 `'${mon.team!.side}': ${mon.species}`);
         });
 
 /**
- * Parses a switch-in action, either by player choice or self-switch. Includes
- * effects that could happen before the main `|switch|` event.
+ * Parses a switch-in action, either by player choice or by self-switch.
+ * Includes effects that could happen before the main `|switch|` event.
  * @param side Player that should be making the switch action.
  * @param accept Callback to accept this pathway.
  */
-async function parseSwitchAction(ctx: BattleParserContext<"gen4">,
+async function switchActionImpl(ctx: BattleParserContext<"gen4">,
     side: SideID, accept?: () => void): Promise<SwitchActionResult>
 {
+    const res: SwitchActionResult = {actioned: {[side]: true}};
     // accept cb gets consumed if one of the optional pre-switch effects accept
     // once it gets called the first time, subsequent uses of this value should
     //  be ignored since we'd now be committing to this pathway
@@ -86,34 +98,24 @@ async function parseSwitchAction(ctx: BattleParserContext<"gen4">,
         a();
     };
 
-    const intercepted = await parsePreSwitch(ctx, side, accept);
+    const interceptRes = await preSwitch(ctx, side, accept);
+    if (interceptRes) Object.assign(res.actioned, interceptRes.actioned);
 
     // expect the actual switch-in
     const mon = await (accept ?
-            parseSwitch(ctx, side, accept) : parseSwitch(ctx, side));
-    return {...mon && {mon}, ...intercepted && {intercepted}};
-}
-
-/**
- * Parses a switch-in action by self-switch. Includes effects that could happen
- * before the main `|switch|` event.
- * @param side Player that should be making the switch action.
- */
-export async function parseSelfSwitch(ctx: BattleParserContext<"gen4">,
-    side: SideID): Promise<SwitchActionResult>
-{
-    return await parseSwitchAction(ctx, side);
+            switchIn(ctx, side, accept) : switchIn(ctx, side));
+    if (mon) res.mon = mon;
+    return res;
 }
 
 /**
  * Parses any pre-switch effects.
  * @param side Pokemon reference who is switching out.
  * @param accept Callback to accept this pathway.
- * @returns The pokemon reference who used up their player action to interrupt
- * this switch-in, or undefined if none found.
+ * @returns The result of a switch-interception move action, if found.
  */
-async function parsePreSwitch(ctx: BattleParserContext<"gen4">, side: SideID,
-    accept?: () => void): Promise<SideID | undefined>
+async function preSwitch(ctx: BattleParserContext<"gen4">, side: SideID,
+    accept?: () => void): Promise<MoveResult>
 {
     accept &&= function preSwitchAccept()
     {
@@ -123,20 +125,20 @@ async function parsePreSwitch(ctx: BattleParserContext<"gen4">, side: SideID,
     };
 
     // parse a possible switch-intercepting move, e.g. pursuit
-    let intercepted: SideID | undefined = side === "p1" ? "p2" : "p1";
+    let intercepting: SideID | undefined = side === "p1" ? "p2" : "p1";
     const committed = !accept;
-    await parseMoveAction(ctx, intercepted, accept, side);
+    const moveRes = await interceptSwitch(ctx, intercepting, side, accept);
     // opponent used up their action interrupting our switch
     if (!committed && !accept)
     {
         // NOTE: switch continues even if target faints
         // TODO: what if user faints, or more pre-switch effects are pending?
     }
-    else intercepted = undefined;
+    else intercepting = undefined;
 
     // TODO: other pre-switch effects, e.g. naturalcure ability
 
-    return intercepted;
+    return moveRes;
 }
 
 /**
@@ -145,7 +147,7 @@ async function parsePreSwitch(ctx: BattleParserContext<"gen4">, side: SideID,
  * @param accept Callback to accept this pathway.
  * @returns The Pokemon that was switched in, or null if not accepted.
  */
-export async function parseSwitch(ctx: BattleParserContext<"gen4">,
+export async function switchIn(ctx: BattleParserContext<"gen4">,
     side: SideID, accept: () => void): Promise<Pokemon | null>;
 /**
  * Parses a single `|switch|`/`|drag|` event and its implications.
@@ -153,13 +155,13 @@ export async function parseSwitch(ctx: BattleParserContext<"gen4">,
  * verification step.
  * @returns The Pokemon that was switched in.
  */
-export async function parseSwitch(ctx: BattleParserContext<"gen4">,
+export async function switchIn(ctx: BattleParserContext<"gen4">,
     side?: SideID): Promise<Pokemon>;
-export async function parseSwitch(ctx: BattleParserContext<"gen4">,
+export async function switchIn(ctx: BattleParserContext<"gen4">,
     side?: SideID, accept?: () => void): Promise<Pokemon | null>
 {
-    const mon = await parseSwitchEvent(ctx, side, accept);
-    if (mon) await parseSwitchEffects(ctx, mon);
+    const mon = await switchEvent(ctx, side, accept);
+    if (mon) await switchEffects(ctx, mon);
     return mon;
 }
 
@@ -172,10 +174,17 @@ export async function parseSwitch(ctx: BattleParserContext<"gen4">,
  * @returns The Pokemon that was switched in, or null if invalid event and
  * `accept` was specified.
  */
-async function parseSwitchEvent(ctx: BattleParserContext<"gen4">,
+async function switchEvent(ctx: BattleParserContext<"gen4">,
     side?: SideID, accept?: () => void): Promise<Pokemon | null>
 {
-    const event = await verify(ctx, "|switch|", "|drag|");
+    let event: Event<"|switch|" | "|drag|">;
+    if (accept)
+    {
+        const ev = await tryVerify(ctx, "|switch|", "|drag|")
+        if (!ev) return null;
+        event = ev;
+    }
+    else event = await verify(ctx, "|switch|", "|drag|");
     const [_, identStr, detailsStr, healthStr] = event.args;
 
     const ident = Protocol.parsePokemonIdent(identStr);
@@ -204,7 +213,7 @@ async function parseSwitchEvent(ctx: BattleParserContext<"gen4">,
     const mon = team.switchIn(options);
     if (!mon)
     {
-        throw new Error(`Couldn't switch in '${identStr}': ` +
+        throw new Error(`Could not switch in '${identStr}': ` +
             `Team '${ident.player}' was too full (size=${team.size})`);
     }
     accept?.();
@@ -217,7 +226,7 @@ async function parseSwitchEvent(ctx: BattleParserContext<"gen4">,
  * @param mon Pokemon that was switched in.
  * @param accept Optional accept cb.
  */
-async function parseSwitchEffects(ctx: BattleParserContext<"gen4">,
+async function switchEffects(ctx: BattleParserContext<"gen4">,
     mon: Pokemon, accept?: () => void): Promise<void>
 {
 

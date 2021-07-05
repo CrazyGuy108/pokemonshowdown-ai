@@ -107,7 +107,7 @@ export type EventHandlerMap
  * @template TResult Result type.
  * @param handlers Map of event handlers.
  */
-export function createDispatcher
+export function dispatcher
 <
     T extends FormatType = FormatType,
     TAgent extends BattleAgent<T> = BattleAgent<T>,
@@ -117,7 +117,7 @@ export function createDispatcher
     handlers: EventHandlerMap<T, TAgent, TArgs, TResult>
 ): BattleParser<T, TAgent, TArgs, TResult | null>
 {
-    return async function dispatcher(ctx: BattleParserContext<T, TAgent>,
+    return async function eventDispatcher(ctx: BattleParserContext<T, TAgent>,
         ...args: TArgs): Promise<TResult | null>
     {
         const event = await tryPeek(ctx);

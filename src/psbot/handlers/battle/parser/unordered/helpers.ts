@@ -21,7 +21,7 @@ import { UnorderedParser } from "./UnorderedParser";
  * @returns The results of the successful BattleParsers that were able to
  * consume an event, in the order that they were parsed.
  */
-export async function expectUnordered
+export async function all
 <
     T extends FormatType = FormatType,
     TAgent extends BattleAgent<T> = BattleAgent<T>,
@@ -116,7 +116,7 @@ export async function expectUnordered
  * @returns Whether one of the parsers accepted an event, paired with the
  * parser's result if true.
  */
-export async function expectOneOf
+export async function oneOf
 <
     T extends FormatType = FormatType,
     TAgent extends BattleAgent<T> = BattleAgent<T>,

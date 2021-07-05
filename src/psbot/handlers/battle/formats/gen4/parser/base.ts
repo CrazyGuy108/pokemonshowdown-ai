@@ -2,14 +2,14 @@ import { Protocol } from "@pkmn/protocol";
 import { BoostID, SideID } from "@pkmn/types";
 import { toIdName } from "../../../../../helpers";
 import { Event } from "../../../../../parser";
-import { baseEventLoop, BattleParserContext, consume, createDispatcher,
+import { baseEventLoop, BattleParserContext, consume, dispatcher,
     EventHandlerMap, tryPeek, verify } from "../../../parser";
 import * as dex from "../dex";
-import { handleAbilitySuffix, parseAbility } from "./ability";
-import { parseMove } from "./move";
-import { parseSwitch } from "./switch";
+import { abilityEvent } from "./ability";
+import { useMove } from "./action/move";
+import { switchIn } from "./action/switch";
 
-/** Private mapped type for {@link handlersImpl}.  */
+/** Private mapped type for {@link handlersImpl}. */
 type HandlersImpl<T> =
     {-readonly [U in keyof T]?: T[U] | "default" | "unsupported"};
 
@@ -23,31 +23,21 @@ type HandlersImpl<T> =
  * `"unsupported"` will be replaced by a parser that always throws.
  */
 const handlersImpl: HandlersImpl<EventHandlerMap<"gen4">> = {};
-handlersImpl["|init|"] = async function(ctx: BattleParserContext<"gen4">)
-{
-    // optional room initializer
-    const event = await verify(ctx, "|init|");
-    if (event.args[1] !== "battle")
-    {
-        throw new Error("Expected room type 'battle' but got " +
-            `'${event.args[1]}'`)
-    }
-    await consume(ctx);
-};
 handlersImpl["|turn|"] = "default";
+// TODO: game-over handler?
 handlersImpl["|win|"] = "default";
 handlersImpl["|tie|"] = "default";
 handlersImpl["|move|"] = async function(ctx: BattleParserContext<"gen4">)
 {
-    return await parseMove(ctx);
+    return await useMove(ctx);
 };
 handlersImpl["|switch|"] = async function(ctx: BattleParserContext<"gen4">)
 {
-    return await parseSwitch(ctx);
+    return await switchIn(ctx);
 };
 handlersImpl["|drag|"] = async function(ctx: BattleParserContext<"gen4">)
 {
-    return await parseSwitch(ctx);
+    return await switchIn(ctx);
 };
 handlersImpl["|detailschange|"] = async function(
     ctx: BattleParserContext<"gen4">)
@@ -91,7 +81,7 @@ handlersImpl["|cant|"] = async function(ctx: BattleParserContext<"gen4">)
             mon.majorStatus.assert("slp").tick(mon.ability);
             break;
         default:
-            handleAbilitySuffix(ctx, event);
+            // TODO: ability suffix?
     }
 
     mon.inactive();
@@ -628,7 +618,7 @@ handlersImpl["|-enditem|"] = async function(ctx: BattleParserContext<"gen4">)
 };
 handlersImpl["|-ability|"] = async function(ctx: BattleParserContext<"gen4">)
 {
-    await parseAbility(ctx);
+    await abilityEvent(ctx);
 };
 handlersImpl["|-endability|"] = async function(ctx: BattleParserContext<"gen4">)
 {
@@ -638,7 +628,7 @@ handlersImpl["|-endability|"] = async function(ctx: BattleParserContext<"gen4">)
     const mon = ctx.state.getTeam(ident.player).active;
     // reveal ability if specified
     if (abilityName && abilityName !== "none") mon.setAbility(abilityName);
-    // event typically(?) caused by gastro acid move
+    // event typically caused by gastro acid move
     mon.volatile.suppressAbility = true;
     await consume(ctx);
 };
@@ -819,7 +809,7 @@ handlersImpl["|-swapsideconditions|"] = "unsupported";
 /**
  * Parser that consumes an ignored event so it doesn't mess with other parsers.
  */
-async function consumeIgnoredEvent(ctx: BattleParserContext<"gen4">)
+async function ignoredEvent(ctx: BattleParserContext<"gen4">)
 {
     const event = await tryPeek(ctx);
     if (!event) return;
@@ -832,10 +822,10 @@ async function consumeIgnoredEvent(ctx: BattleParserContext<"gen4">)
  * Parser that consumes any ignored events so they don't mess with other
  * parsers.
  */
-export const consumeIgnoredEvents = baseEventLoop(consumeIgnoredEvent);
+export const ignoredEvents = baseEventLoop(ignoredEvent);
 
 /** Handlers for all {@link Protocol.ArgName event types}. */
-export const handlers: EventHandlerMap<"gen4"> =
+export const handlers: Required<EventHandlerMap<"gen4">> =
     // this Object.assign expression is so that the function names appear as if
     //  they were defined directly as properties of this object so that stack
     //  traces make more sense
@@ -862,7 +852,7 @@ export const handlers: EventHandlerMap<"gen4"> =
                     }
                 }
                 // handler already implemented, don't override it
-                : {}));
+                : undefined));
 
 async function defaultParser(ctx: BattleParserContext<"gen4">,
     key: Protocol.ArgName)
@@ -878,4 +868,4 @@ async function unsupportedParser(ctx: BattleParserContext<"gen4">,
 }
 
 /** Dispatches base event handler. */
-export const dispatch = createDispatcher(handlers);
+export const dispatch = dispatcher(handlers);

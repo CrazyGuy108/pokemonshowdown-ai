@@ -4,10 +4,12 @@
  */
 import { Protocol } from "@pkmn/protocol";
 import { GenerationNum, StatID } from "@pkmn/types";
-import { BattleParserContext, consume, peek, unordered } from "../../../parser";
+import { BattleParserContext, peek, tryVerify, unordered } from
+    "../../../parser";
 import { HPType } from "../dex";
 import { BattleState } from "../state";
 import { TeamRevealOptions } from "../state/Team";
+import { handlers as base } from "./base";
 
 /**
  * Parses the initialization step of a battle up to but not including the first
@@ -16,22 +18,27 @@ import { TeamRevealOptions } from "../state/Team";
 export async function init(ctx: BattleParserContext<"gen4">)
 {
     // initialization events
-    await unordered.expectUnordered(ctx,
+    await unordered.all(ctx,
     [
         initBattle(), gameType(), player(1), request(/*first*/ true), player(2),
-        teamSize(1), teamSize(2), gen(4), tier()
-        // TODO: |rated|, |seed|, |split|, |teampreview|, |clearpoke|, |poke|,
-        //  |rule|
+        teamSize(1), teamSize(2), gen(4), tier(), rules()
+        // TODO: |rated|, |seed|, |split|, |teampreview|, |clearpoke|, |poke|
     ],
-        parseIgnoredUpToStart);
+        ignoredUpToStart);
 }
 
+/**
+ * Optional `|init|battle` room initializer message.
+ *
+ * Note that this is optional because this isn't shown if the battle doesn't
+ * take place in a PS battle room, e.g. when using the sim's battle steam lib.
+ */
 const initBattle = () =>
     unordered.createUnorderedDeadline(
         async function initBattleParser(ctx, accept)
         {
-            const event = await peek(ctx);
-            if (event.args[0] !== "init") return;
+            const event = await tryVerify(ctx, "|init|");
+            if (!event) return;
             accept();
 
             if (event.args[1] !== "battle")
@@ -39,19 +46,15 @@ const initBattle = () =>
                 throw new Error("Expected room type 'battle' but got " +
                     `'${event.args[1]}'`)
             }
-            await consume(ctx);
-        }
-        // note: don't specify reject callback here since this message isn't
-        //  shown if we're not in a battle room, e.g. when using the sim's
-        //  battle stream api
-        );
+            await base["|init|"](ctx);
+        });
 
 const gameType = () =>
     unordered.createUnorderedDeadline(
         async function gameTypeParser(ctx, accept)
         {
-            const event = await peek(ctx);
-            if (event.args[0] !== "gametype") return;
+            const event = await tryVerify(ctx, "|gametype|");
+            if (!event) return;
             accept();
 
             if (event.args[1] !== "singles")
@@ -59,7 +62,7 @@ const gameType = () =>
                 throw new Error("Expected game type 'singles' but got " +
                     `'${event.args[1]}'`);
             }
-            await consume(ctx);
+            await base["|gametype|"](ctx);
         },
         () => { throw new Error("Expected |gametype|singles event"); });
 
@@ -67,19 +70,15 @@ const player = (num: 1 | 2) =>
     unordered.createUnorderedDeadline(
         async function playerParser(ctx, accept)
         {
-            const event = await peek(ctx);
-            if (event.args[0] !== "player" ||
-                event.args[1] !== `p${num}` as const)
-            {
-                return;
-            }
+            const event = await tryVerify(ctx, "|player|");
+            if (!event || event.args[1] !== `p${num}` as const) return;
             accept();
 
             if (ctx.state.username === event.args[2])
             {
                 ctx.state.ourSide = event.args[1];
             }
-            await consume(ctx);
+            await base["|player|"](ctx);
         },
         () => { throw new Error(`Expected |player|p${num}| event`); });
 
@@ -87,8 +86,8 @@ const request = (first?: boolean) =>
     unordered.createUnorderedDeadline(
         async function requestParser(ctx, accept)
         {
-            const event = await peek(ctx);
-            if (event.args[0] !== "request") return;
+            const event = await tryVerify(ctx, "|request|");
+            if (!event) return;
             accept();
 
             // only the first |request| msg can be used to initialize the
@@ -97,7 +96,7 @@ const request = (first?: boolean) =>
             {
                 initRequest(ctx.state, Protocol.parseRequest(event.args[1]))
             }
-            await consume(ctx);
+            await base["|request|"](ctx);
         },
         () => { throw new Error("Expected |request| event"); });
 
@@ -105,12 +104,8 @@ const teamSize = (num: 1 | 2) =>
     unordered.createUnorderedDeadline(
         async function teamSizeParser(ctx, accept)
         {
-            const event = await peek(ctx);
-            if (event.args[0] !== "teamsize" ||
-                event.args[1] !== `p${num}` as const)
-            {
-                return;
-            }
+            const event = await tryVerify(ctx, "|teamsize|");
+            if (!event || event.args[1] !== `p${num}` as const) return;
             accept();
 
             // client's side should be initialized by the first |request| msg
@@ -120,7 +115,7 @@ const teamSize = (num: 1 | 2) =>
                 const size = Number(sizeStr);
                 ctx.state.getTeam(sideId).size = size;
             }
-            await consume(ctx);
+            await base["|teamsize|"](ctx);
         },
         () => { throw new Error(`Expected |teamsize|p${num}| event`); });
 
@@ -128,8 +123,8 @@ const gen = (num: GenerationNum) =>
     unordered.createUnorderedDeadline(
         async function genParser(ctx, accept)
         {
-            const event = await peek(ctx);
-            if (event.args[0] !== "gen") return;
+            const event = await tryVerify(ctx, "|gen|");
+            if (!event) return;
             accept();
 
             const [_, genNum] = event.args;
@@ -139,33 +134,35 @@ const gen = (num: GenerationNum) =>
                     `|gen|${genNum}`);
             }
             // TODO: record gen?
-            await consume(ctx);
+            await base["|gen|"](ctx);
         });
 
 const tier = () =>
     unordered.createUnorderedDeadline(
         async function tierParser(ctx, accept)
         {
-            const event = await peek(ctx);
-            if (event.args[0] !== "tier") return;
+            const event = await tryVerify(ctx, "|tier|");
+            if (!event) return;
             accept();
 
             // TODO: record tier?
-            await consume(ctx);
+            await base["|tier|"](ctx);
         });
 
-const rule = () =>
+const rules = () =>
     unordered.createUnorderedDeadline(
         async function ruleParser(ctx, accept)
         {
-            const event = await peek(ctx);
-            if (event.args[0] !== "rule") return;
+            let event = await tryVerify(ctx, "|rule|");
+            if (!event) return;
             accept();
-
-            // TODO: record rules/mods?
-            // recursion in order to parse multiple rules
-            await consume(ctx);
-            await unordered.expectUnordered(ctx, [rule()]);
+            do
+            {
+                // TODO: record rules/mods?
+                await base["|rule|"](ctx);
+                event = await tryVerify(ctx, "|rule|");
+            }
+            while (event);
         });
 
 /**
@@ -258,8 +255,10 @@ function initRequest(state: BattleState, req: Protocol.Request)
     }
 }
 
-/** Consumes all irrelevant events up to the final `|start` event. */
-async function parseIgnoredUpToStart(ctx: BattleParserContext<"gen4">,
+/**
+ * Consumes all irrelevant events up to and including the final `|start` event.
+ */
+async function ignoredUpToStart(ctx: BattleParserContext<"gen4">,
     accept: () => void): Promise<void>
 {
     const event = await peek(ctx);
@@ -274,8 +273,11 @@ async function parseIgnoredUpToStart(ctx: BattleParserContext<"gen4">,
             accept();
             // fallthrough
         default:
-            // consume event but don't accept it so the parser can be called
-            //  again later to consume another irrelevant event
-            await consume(ctx);
+        {
+            // handle.consume event but don't accept it so the parser can be
+            //  called again later to consume another irrelevant event
+            const key = Protocol.key(event.args);
+            if (key) await base[key](ctx);
+        }
     }
 }
