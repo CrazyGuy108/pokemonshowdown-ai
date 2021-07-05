@@ -26,79 +26,155 @@ export function moveAction(side: SideID, reject?: () => void)
  * Pokemon being interrupted.
  */
 export async function parseMoveAction(ctx: BattleParserContext<"gen4">,
-    side: SideID, accept: () => void, intercept?: SideID): Promise<void>
+    side: SideID, accept?: () => void, intercept?: SideID): Promise<void>
 {
     // accept cb gets consumed if one of the optional pre-move effects accept
     // once it gets called the first time, subsequent uses of this value should
     //  be ignored since we'd now be committing to this pathway
-    let innerAccept: (() => void) | undefined =
-        function() { innerAccept = undefined; accept(); };
-
-    // expect switch interception effect if specified
-    let interceptMove: dex.Move | undefined;
-    if (intercept)
+    accept &&= function moveActionAccept()
     {
-        interceptMove = await parseInterception(ctx, intercept, innerAccept);
-    }
+        const a = accept!;
+        accept = undefined;
+        a();
+    };
 
-    // expect any pre-move effects, e.g. custapberry/quickclaw
-    // TODO: can these still happen for intercepts?
-    await parsePreMove(ctx, side, innerAccept);
+    // expect any pre-move effects, e.g. pursuit or custapberry
+    const preMoveRes = await parsePreMove(ctx, side, accept);
+    if (preMoveRes === "inactive") return;
 
     // expect the actual move
-    return await parseMove(ctx, interceptMove, innerAccept);
+    await parseMove(ctx, side, preMoveRes, accept);
 }
 
 /**
- * Parses an event that signals a move interruption.
- * @param intercept Pokemon reference whose switch action is being intercepted.
+ * Parses any pre-move effects.
+ * @param side Pokemon reference who is using the move.
  * @param accept Callback to accept this pathway.
- * @returns The {@link dex.Move} that's being used, or null if the event wasn't
- * found.
+ * @param intercept If this move choice is intercepting a switch, specifies the
+ * Pokemon that would be interrupted.
+ * @returns Either, the {@link dex.Move} that's being used if it was revealed
+ * before the initial `|move|` event, `"inactive"` if the move action was
+ * canceled, or otherwise undefined.
  */
-async function parseInterception(ctx: BattleParserContext<"gen4">,
-    intercept: SideID, accept: () => void): Promise<dex.Move | undefined>
+async function parsePreMove(ctx: BattleParserContext<"gen4">, side: SideID,
+    accept?: () => void, intercept?: SideID):
+    Promise<dex.Move | "inactive" | undefined>
+{
+    accept &&= function preMoveAccept()
+    {
+        const a = accept!;
+        accept = undefined;
+        a();
+    };
+
+    // expect switch interception effect if we're allowed to
+    let move: dex.Move | undefined;
+    if (intercept)
+    {
+        const committed = !accept;
+        move = await parseIntercept(ctx, intercept, accept);
+        if (!move && committed)
+        {
+            throw new Error("Expected event to interrupt switch-in for " +
+                intercept);
+        }
+    }
+    else
+    {
+        // custapberry can only activate if we're not intercepting a switch
+        // TODO
+    }
+
+    // TODO: pre-move inactivity checks
+    // TODO: confirm order
+    // slp/par/frz
+    // attract
+    // confusion
+
+    return move;
+}
+
+/**
+ * Parses an event that signals a switch interruption, e.g. pursuit.
+ * @param intercept Pokemon reference whose switch action is being interrupted.
+ * @param accept Callback to accept this pathway.
+ * @returns The {@link dex.Move} that's being used, or undefined if the event
+ * wasn't found.
+ */
+async function parseIntercept(ctx: BattleParserContext<"gen4">,
+    intercept: SideID, accept?: () => void): Promise<dex.Move | undefined>
 {
     const event = await tryVerify(ctx, "|-activate|");
     if (!event) return;
-
     const [_, identStr, effectStr] = event.args;
     if (!identStr) return;
     const ident = Protocol.parsePokemonIdent(identStr);
     if (ident.player !== intercept) return;
-    const mon = ctx.state.getTeam(ident.player).active;
-
     const effect = Protocol.parseEffect(effectStr, toIdName);
     if (effect.type !== "move") return;
+
     const move = dex.getMove(effect.name);
     if (!move?.data.flags?.interceptSwitch) return;
 
-    accept();
+    accept?.();
+    const mon = ctx.state.getTeam(ident.player).active;
     mon.moveset.reveal(move.data.name);
     await consume(ctx);
     return move;
 }
 
 /**
- * Parses any pre-move effects, e.g. custapberry/quickclaw.
- * @param side Pokemon reference who is using the move.
- * @param accept Callback to accept this pathway.
- */
-async function parsePreMove(ctx: BattleParserContext<"gen4">,
-    side: SideID, accept?: () => void): Promise<void>
-{
-    // TODO
-}
-
-/**
  * Parses a single `|move|` event and its implications.
+ * @param side Pokemon reference that should be using the move.
  * @param move Optional move to expect.
  * @param accept Optional callback to accept this pathway.
  */
-export async function parseMove(ctx: BattleParserContext<"gen4">,
-    move?: dex.Move, accept?: () => void): Promise<void>
+export async function parseMove(ctx: BattleParserContext<"gen4">, side?: SideID,
+    move?: dex.Move | "recharge", accept?: () => void): Promise<void>
 {
-    await verify(ctx, "|move|");
-    // TODO
+    const event = await verify(ctx, "|move|");
+    const [_, identStr, moveName] = event.args;
+    const ident = Protocol.parsePokemonIdent(identStr);
+    const moveId = toIdName(moveName);
+
+    if (side && side !== ident.player)
+    {
+        if (accept) return;
+        throw new Error(`Expected move for ${side} but got ${ident.player}`);
+    }
+
+    const cmp = move === "recharge" ? move : move?.data.name;
+    if (cmp && cmp !== moveId)
+    {
+        if (accept) return;
+        throw new Error(`Expected move '${cmp}' but got '${moveId}'`);
+    }
+
+    // fill in missing move arg
+    if (!move)
+    {
+        if (moveId === "recharge") move = "recharge";
+        else
+        {
+            const m = dex.getMove(moveId);
+            if (!m)
+            {
+                if (accept) return;
+                throw new Error(`Unknown move '${moveId}'`);
+            }
+            move = m;
+        }
+    }
+
+    accept?.();
     await consume(ctx);
+    await parseMoveEffects(ctx, ident.player, move);
+}
+
+/** Parses effects from a move. */
+async function parseMoveEffects(ctx: BattleParserContext<"gen4">,
+    side: SideID, move: dex.Move | "recharge"): Promise<void>
+{
+
+    // TODO
 }

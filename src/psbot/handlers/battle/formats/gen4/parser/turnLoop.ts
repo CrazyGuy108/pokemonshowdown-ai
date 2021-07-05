@@ -4,7 +4,7 @@ import { consumeIgnoredEvents } from "./base";
 import { parseMultipleSwitchIns } from "./switch";
 
 /** Parses each turn of the battle until game over.  */
-export async function turnLoop(ctx: BattleParserContext<"gen4">)
+export async function turnLoop(ctx: BattleParserContext<"gen4">): Promise<void>
 {
     // initial switch-ins happen on turn 1
     await parseTurn1(ctx);
@@ -15,7 +15,7 @@ export async function turnLoop(ctx: BattleParserContext<"gen4">)
 }
 
 /** Parses the first turn and its initial switch-ins. */
-async function parseTurn1(ctx: BattleParserContext<"gen4">)
+async function parseTurn1(ctx: BattleParserContext<"gen4">): Promise<void>
 {
     await parseMultipleSwitchIns(ctx);
     await parseTurnEvent(ctx, /*num*/ 1);
@@ -26,6 +26,10 @@ async function parseTurn(ctx: BattleParserContext<"gen4">, num: number):
     Promise<boolean>
 {
     // TODO: game-over detection
+
+    await consumeIgnoredEvents(ctx);
+    await parsePreTurn(ctx);
+
     await consumeIgnoredEvents(ctx);
     await parsePlayerActions(ctx);
 
@@ -36,12 +40,21 @@ async function parseTurn(ctx: BattleParserContext<"gen4">, num: number):
     return false;
 }
 
-async function parseTurnEvent(ctx: BattleParserContext<"gen4">, num: number)
+/** Handles pre-turn effects. */
+async function parsePreTurn(ctx: BattleParserContext<"gen4">): Promise<void>
+{
+    // TODO: quickclaw
+}
+
+/** Parses `|turn|` event to end the current turn. */
+async function parseTurnEvent(ctx: BattleParserContext<"gen4">, num: number):
+    Promise<void>
 {
     const event = await verify(ctx, "|turn|");
     if (event.args[1] !== "1")
     {
         throw new Error(`Expected |turn|${num} event`);
     }
+
     await consume(ctx);
 }

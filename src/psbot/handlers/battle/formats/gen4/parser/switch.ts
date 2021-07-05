@@ -74,28 +74,23 @@ const switchEffectsInf = (mon: Pokemon) =>
  * @param accept Callback to accept this pathway.
  */
 async function parseSwitchAction(ctx: BattleParserContext<"gen4">,
-    side: SideID, accept: () => void): Promise<SwitchActionResult>
+    side: SideID, accept?: () => void): Promise<SwitchActionResult>
 {
     // accept cb gets consumed if one of the optional pre-switch effects accept
-    let innerAccept: (() => void) | undefined =
-        function() { innerAccept = undefined; accept(); };
-
-    // expect a switch-intercepting move, e.g. pursuit
-    let intercepted: SideID | undefined = side === "p1" ? "p2" : "p1";
-    await parseMoveAction(ctx, intercepted, innerAccept, side);
-    if (!innerAccept)
+    // once it gets called the first time, subsequent uses of this value should
+    //  be ignored since we'd now be committing to this pathway
+    accept &&= function switchActionAccept()
     {
-        // opponent used up their action interrupting our switch
-        // NOTE: switch continues if target faints
-        // TODO: what if user faints, or more pre-switch effects are pending?
-    }
-    else intercepted = undefined;
+        const a = accept!;
+        accept = undefined;
+        a();
+    };
 
-    // expect any pre-switch effects, e.g. naturalcure ability
-    // TODO
+    const intercepted = await parsePreSwitch(ctx, side, accept);
 
     // expect the actual switch-in
-    const mon = await parseSwitch(ctx, side, innerAccept);
+    const mon = await (accept ?
+            parseSwitch(ctx, side, accept) : parseSwitch(ctx, side));
     return {...mon && {mon}, ...intercepted && {intercepted}};
 }
 
@@ -107,13 +102,41 @@ async function parseSwitchAction(ctx: BattleParserContext<"gen4">,
 export async function parseSelfSwitch(ctx: BattleParserContext<"gen4">,
     side: SideID): Promise<SwitchActionResult>
 {
-    let accepted = false;
-    const res = await parseSwitchAction(ctx, side, () => accepted = true);
-    if (!res.mon || !accepted)
+    return await parseSwitchAction(ctx, side);
+}
+
+/**
+ * Parses any pre-switch effects.
+ * @param side Pokemon reference who is switching out.
+ * @param accept Callback to accept this pathway.
+ * @returns The pokemon reference who used up their player action to interrupt
+ * this switch-in, or undefined if none found.
+ */
+async function parsePreSwitch(ctx: BattleParserContext<"gen4">, side: SideID,
+    accept?: () => void): Promise<SideID | undefined>
+{
+    accept &&= function preSwitchAccept()
     {
-        throw new Error(`Expected |switch| event for '${side}'`);
+        const a = accept!;
+        accept = undefined;
+        a();
+    };
+
+    // parse a possible switch-intercepting move, e.g. pursuit
+    let intercepted: SideID | undefined = side === "p1" ? "p2" : "p1";
+    const committed = !accept;
+    await parseMoveAction(ctx, intercepted, accept, side);
+    // opponent used up their action interrupting our switch
+    if (!committed && !accept)
+    {
+        // NOTE: switch continues even if target faints
+        // TODO: what if user faints, or more pre-switch effects are pending?
     }
-    return res;
+    else intercepted = undefined;
+
+    // TODO: other pre-switch effects, e.g. naturalcure ability
+
+    return intercepted;
 }
 
 /**

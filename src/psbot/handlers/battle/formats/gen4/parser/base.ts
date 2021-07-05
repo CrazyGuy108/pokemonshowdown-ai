@@ -9,14 +9,20 @@ import { handleAbilitySuffix, parseAbility } from "./ability";
 import { parseMove } from "./move";
 import { parseSwitch } from "./switch";
 
-// TODO: move to helper/lib file
-type Writable<T> = {-readonly [U in keyof T]: T[U]};
+/** Private mapped type for {@link handlersImpl}.  */
+type HandlersImpl<T> =
+    {-readonly [U in keyof T]?: T[U] | "default" | "unsupported"};
 
 /**
  * BattleParser handlers for each event type. Larger handler functions or
  * parsers that take additional args are moved to a separate file.
+ *
+ * If an entry is specified but set to `"default"`, a default handler will be
+ * assigned to it, making it an event that shouldn't be ignored but has no
+ * special behavior implemented by its handler. Similarly, setting it to
+ * `"unsupported"` will be replaced by a parser that always throws.
  */
-const handlersImpl: Writable<Partial<EventHandlerMap<"gen4">>> = {};
+const handlersImpl: HandlersImpl<EventHandlerMap<"gen4">> = {};
 handlersImpl["|init|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     // optional room initializer
@@ -28,6 +34,9 @@ handlersImpl["|init|"] = async function(ctx: BattleParserContext<"gen4">)
     }
     await consume(ctx);
 };
+handlersImpl["|turn|"] = "default";
+handlersImpl["|win|"] = "default";
+handlersImpl["|tie|"] = "default";
 handlersImpl["|move|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     return await parseMove(ctx);
@@ -643,26 +652,11 @@ handlersImpl["|-transform|"] = async function(ctx: BattleParserContext<"gen4">)
         ctx.state.getTeam(identTarget.player).active);
     await consume(ctx);
 };
-handlersImpl["|-mega|"] = async function(ctx: BattleParserContext<"gen4">)
-{
-    throw new Error("Unsupported event type '|-mega|'");
-};
-handlersImpl["|-primal|"] = async function(ctx: BattleParserContext<"gen4">)
-{
-    throw new Error("Unsupported event type '|-primal|'");
-};
-handlersImpl["|-burst|"] = async function(ctx: BattleParserContext<"gen4">)
-{
-    throw new Error("Unsupported event type '|-burst|'");
-};
-handlersImpl["|-zpower|"] = async function(ctx: BattleParserContext<"gen4">)
-{
-    throw new Error("Unsupported event type '|-zpower|'");
-};
-handlersImpl["|-zbroken|"] = async function(ctx: BattleParserContext<"gen4">)
-{
-    throw new Error("Unsupported event type '|-zbroken|'");
-};
+handlersImpl["|-mega|"] = "unsupported";
+handlersImpl["|-primal|"] = "unsupported";
+handlersImpl["|-burst|"] = "unsupported";
+handlersImpl["|-zpower|"] = "unsupported";
+handlersImpl["|-zbroken|"] = "unsupported";
 handlersImpl["|-activate|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-activate|");
@@ -761,18 +755,9 @@ handlersImpl["|-fieldactivate|"] = async function(
     // TODO
     await consume(ctx);
 };
-handlersImpl["|-center|"] = async function(ctx: BattleParserContext<"gen4">)
-{
-    throw new Error("Unsupported event type '|-center|'");
-};
-handlersImpl["|-combine|"] = async function(ctx: BattleParserContext<"gen4">)
-{
-    throw new Error("Unsupported event type '|-combine|'");
-};
-handlersImpl["|-waiting|"] = async function(ctx: BattleParserContext<"gen4">)
-{
-    throw new Error("Unsupported event type '|-waiting|'");
-};
+handlersImpl["|-center|"] = "unsupported";
+handlersImpl["|-combine|"] = "unsupported";
+handlersImpl["|-waiting|"] = "unsupported";
 handlersImpl["|-prepare|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-prepare|");
@@ -827,35 +812,9 @@ handlersImpl["|-singleturn|"] = async function(ctx: BattleParserContext<"gen4">)
     }
     await consume(ctx);
 };
-handlersImpl["|-candynamax|"] = async function(ctx: BattleParserContext<"gen4">)
-{
-    throw new Error("Unsupported event type '|-candynamax|'");
-};
-handlersImpl["|updatepoke|"] = async function(ctx: BattleParserContext<"gen4">)
-{
-    throw new Error("Unsupported event type '|updatepoke|'");
-};
-handlersImpl["|-swapsideconditions|"] = async function(
-    ctx: BattleParserContext<"gen4">)
-{
-    throw new Error("Unsupported event type '|-swapsideconditions|'");
-};
-
-/**
- * Event types that have handlers implemented for them. All others should be
- * ignored and/or skipped while parsing game events.
- */
-export const allowedKeys = Object.keys(handlersImpl) as
-    readonly Protocol.ArgName[];
-
-/**
- * Checks whether the given event type should be handled by the
- * {@link dispatch dispatcher}. If false, then the event can be safely ignored.
- */
-export function isAllowedKey(key: any): boolean
-{
-    return handlersImpl.hasOwnProperty(key);
-}
+handlersImpl["|-candynamax|"] = "unsupported";
+handlersImpl["|updatepoke|"] = "unsupported";
+handlersImpl["|-swapsideconditions|"] = "unsupported";
 
 /**
  * Parser that consumes an ignored event so it doesn't mess with other parsers.
@@ -863,7 +822,10 @@ export function isAllowedKey(key: any): boolean
 async function consumeIgnoredEvent(ctx: BattleParserContext<"gen4">)
 {
     const event = await tryPeek(ctx);
-    if (event && isAllowedKey(Protocol.key(event.args))) await consume(ctx);
+    if (!event) return;
+    const key = Protocol.key(event.args);
+    if (!key || !handlersImpl.hasOwnProperty(key)) return;
+    await consume(ctx);
 }
 
 /**
@@ -873,25 +835,47 @@ async function consumeIgnoredEvent(ctx: BattleParserContext<"gen4">)
 export const consumeIgnoredEvents = baseEventLoop(consumeIgnoredEvent);
 
 /** Handlers for all {@link Protocol.ArgName event types}. */
-const allHandlers: EventHandlerMap<"gen4"> =
-{
-    // this weird Object.assign expression is so that the function names appear
-    //  as if they were defined directly as properties of this object so that
-    //  stack traces make sense
-    ...Object.assign({},
+export const handlers: EventHandlerMap<"gen4"> =
+    // this Object.assign expression is so that the function names appear as if
+    //  they were defined directly as properties of this object so that stack
+    //  traces make more sense
+    Object.assign({},
+        handlersImpl,
+        // fill in unimplemented handlers
         ...(Object.keys(Protocol.ARGS) as Protocol.ArgName[])
-            .filter(key => !handlersImpl.hasOwnProperty(key))
             .map(key =>
-            ({
-                // default parser just consumes the event
-                async [key](ctx: BattleParserContext<"gen4">)
+                !handlersImpl.hasOwnProperty(key) ||
+                    handlersImpl[key] === "default" ?
                 {
-                    await verify(ctx, key as Protocol.ArgName);
-                    await consume(ctx);
+                    // default parser just consumes the event
+                    async [key](ctx: BattleParserContext<"gen4">)
+                    {
+                        await defaultParser(ctx, key);
+                    }
                 }
-            }))),
-    ...handlersImpl
+                : handlersImpl[key] === "unsupported" ?
+                {
+                    // unsupported parser throws an error
+                    async [key](ctx: BattleParserContext<"gen4">)
+                    {
+                        await unsupportedParser(ctx, key);
+                    }
+                }
+                // handler already implemented, don't override it
+                : {}));
+
+async function defaultParser(ctx: BattleParserContext<"gen4">,
+    key: Protocol.ArgName)
+{
+    await verify(ctx, key);
+    await consume(ctx);
+}
+
+async function unsupportedParser(ctx: BattleParserContext<"gen4">,
+    key: Protocol.ArgName)
+{
+    throw new Error(`Unsupported event type '${key}'`);
 }
 
 /** Dispatches base event handler. */
-export const dispatch = createDispatcher(allHandlers);
+export const dispatch = createDispatcher(handlers);
