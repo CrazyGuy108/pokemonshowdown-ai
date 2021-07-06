@@ -1,9 +1,83 @@
 import { Protocol } from "@pkmn/protocol";
+import { SideID } from "@pkmn/types";
 import { toIdName } from "../../../../../helpers";
 import { Event } from "../../../../../parser";
-import { BattleParserContext, consume, verify } from "../../../parser";
+import { BattleParserContext, consume, inference, peek, verify } from
+    "../../../parser";
 import * as dex from "../dex";
 import { Pokemon } from "../state/Pokemon";
+import { hasAbility } from "./reason/ability";
+
+/**
+ * Creates an EventInference parser that expects an on-`switchOut` ability to
+ * activate if possible.
+ * @param side Pokemon reference who could have such an ability.
+ */
+export async function onSwitchOut(ctx: BattleParserContext<"gen4">,
+    side: SideID)
+{
+    const mon = ctx.state.getTeam(side).active;
+    const abilities = getAbilities(mon, ability => ability.canSwitchOut(mon))
+    return new inference.EventInference(new Set(abilities.values()),
+        onSwitchOutImpl, side, abilities);
+}
+
+async function onSwitchOutImpl(ctx: BattleParserContext<"gen4">,
+    accept: inference.AcceptCallback, side: SideID,
+    abilities: Map<dex.Ability, inference.SubInference>)
+{
+    const event = await peek(ctx);
+    // TODO: check for on-switchout ability effects
+    // TODO: event format?
+}
+
+/**
+ * Searches for possible ability pathways based on the given predicate.
+ * @param mon Pokemon to search.
+ * @param prove Callback for filtering eligible abilities. Should return a set
+ * of {@link inference.SubReason reasons} that would prove that the ability
+ * could activate, or null if it can't.
+ * @returns A Map of {@link dex.Ability} to a {@link inference.SubInference}
+ * modeling its restrictions given by the predicate.
+ */
+function getAbilities(mon: Pokemon,
+    prove: (ability: dex.Ability) => Set<inference.SubReason> | null):
+    Map<dex.Ability, inference.SubInference>
+{
+    const res = new Map<dex.Ability, inference.SubInference>();
+    if (mon.volatile.suppressAbility) return res;
+
+    for (const name of mon.traits.ability.possibleValues)
+    {
+        const ability = dex.getAbility(mon.traits.ability.map[name]);
+        const reasons = prove(ability);
+        if (!reasons) continue;
+        reasons.add(hasAbility(mon, new Set([name])));
+        res.set(ability, new inference.SubInference(reasons));
+    }
+    return res;
+}
+
+/**
+ * Creates an EventInference that expects an ability activation.
+ * @param accept Callback to accept one of the provided ability pathways.
+ * @param on Context in which the ability would activate.
+ * @param side Pokemon reference who could have such an ability.
+ * @param abilities Eligible ability pathways.
+ * @param hitBy Move and user-ref that hit the ability holder with a move, if
+ * applicable.
+ */
+async function activateAbility(ctx: BattleParserContext<"gen4">,
+    accept: inference.AcceptCallback, on: dex.AbilityOn, side: SideID,
+    abilities: ReadonlyMap<dex.Ability, inference.SubInference>,
+    hitBy?: dex.MoveAndUserRef)
+{
+    switch (on)
+    {
+        case "switchOut":
+
+    }
+}
 
 /**
  * Parses an `|-ability|` event.

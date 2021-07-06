@@ -2,6 +2,7 @@ import { BattleAgent } from "../../agent";
 import { FormatType } from "../../formats";
 import { UnorderedParser } from "./UnorderedParser";
 
+// TODO: make this a class?
 /**
  * BattleParser wrapper that can be put on a deadline.
  * @template T Format type.
@@ -20,8 +21,11 @@ export interface UnorderedDeadline
     /**
      * Method to call when the parser never accepts an event by some deadline.
      */
-    reject?(): void;
+    reject?: RejectCallback;
 }
+
+/** Callback to reject an {@link UnorderedDeadline} pathway. */
+export type RejectCallback = () => void;
 
 /**
  * Creates an UnorderedDeadline obj.
@@ -40,7 +44,7 @@ export function createUnorderedDeadline
     TResult = unknown
 >(
     parser: UnorderedParser<T, TAgent, TArgs, TResult>,
-    reject?: () => void, ...args: TArgs):
+    reject?: RejectCallback, ...args: TArgs):
     UnorderedDeadline<T, TAgent, TResult>
 {
     return {parse: (ctx, accept) => parser(ctx, accept, ...args), reject};

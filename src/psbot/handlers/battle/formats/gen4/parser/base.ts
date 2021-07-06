@@ -806,6 +806,12 @@ handlersImpl["|-candynamax|"] = "unsupported";
 handlersImpl["|updatepoke|"] = "unsupported";
 handlersImpl["|-swapsideconditions|"] = "unsupported";
 
+/** Checks whether an event can be safely ignored based on its key. */
+export function isAllowedKey(key?: string): boolean
+{
+    return !!key && handlersImpl.hasOwnProperty(key);
+}
+
 /**
  * Parser that consumes an ignored event so it doesn't mess with other parsers.
  */

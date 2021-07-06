@@ -1,59 +1,86 @@
 /** @file Handles parsing a player's main action. */
+import { Protocol } from "@pkmn/protocol";
 import { SideID } from "@pkmn/types";
-import { BattleAgent } from "../../../../agent";
 import { BattleParserContext, consume, eventLoop, peek, unordered } from
     "../../../../parser";
-import { moveAction } from "./move";
-import { switchAction } from "./switch";
+import { isAllowedKey } from "../base";
+import { moveAction, MoveActionResult } from "./move";
+import { switchAction, SwitchActionResult } from "./switch";
 
 /** Required base result type for action parsers. */
 export interface ActionResult
 {
     /** Specifies the pokemon that took an action this turn. */
-    actioned?: {[S in SideID]?: true};
+    actioned?: PlayerActionsState;
 }
+
+/** Specifies the pokemon that took an action this turn. */
+type PlayerActionsState = {[S in SideID]?: true};
 
 /** Parses each player's main actions for this turn. */
 export async function playerActions(ctx: BattleParserContext<"gen4">)
 {
     // shared state used to track whether each pokemon has spent their action
     //  for this turn
-    const actioned: {[S in SideID]?: true} = {};
+    const actioned: PlayerActionsState = {};
 
-    return await unordered.all(ctx,
+    const switchResults = await unordered.all(ctx,
         (Object.entries(ctx.state.teams) as [SideID, any][])
-            .map(([side]) => playerAction(side, actioned)),
+            .map(([side]) => playerSwitchAction(side, actioned)),
         filter);
+    Object.assign(actioned, switchResults.map(res => res.actioned));
+
+    const moveResults = await unordered.all(ctx,
+        (Object.entries(ctx.state.teams) as [SideID, any][])
+            .filter(([side]) => !actioned[side])
+            .map(([side]) => playerMoveAction(side, actioned)),
+        filter);
+    Object.assign(actioned, moveResults.map(res => res.actioned));
+
+    for (const side in actioned)
+    {
+        if (!actioned.hasOwnProperty(side)) continue;
+        // TODO: throw/aggregate multiple errors?
+        // TODO: don't throw if game-over
+        throw new Error(`Expected ${side} player action`);
+    }
 }
 
-/**
- * Creates an UnorderedDeadline parser for a player's main action for this turn.
- * @param side Player's side.
- * @param actioned Map of Pokemon reference to whether they've spent their
- * action for this turn.
- */
-const playerAction = (side: SideID, actioned: {[S in SideID]?: true}) =>
-    unordered.createUnorderedDeadline(
-        async function parsePlayerAction(ctx, accept)
-        {
-            if (actioned[side])
-            {
-                accept();
-                return;
-            }
+const playerSwitchAction = (side: SideID, actioned: PlayerActionsState) =>
+    unordered.createUnorderedDeadline(playerSwitchActionImpl,
+        /*rejected*/ undefined, side, actioned);
 
-            // TODO: switch action always happens before move
-            const [ok, res] = await unordered.oneOf<
-                    "gen4", BattleAgent<"gen4">, [], ActionResult>(
-                ctx, [switchAction(side), moveAction(side)]);
-            if (ok) accept();
-            // update actioned state
-            if (res?.actioned) Object.assign(actioned, res.actioned);
-        },
-        () => { throw new Error(`Expected ${side} action`); });
+async function playerSwitchActionImpl(ctx: BattleParserContext<"gen4">,
+    accept: unordered.AcceptCallback, side: SideID,
+    actioned: PlayerActionsState): Promise<SwitchActionResult>
+{
+    if (actioned[side])
+    {
+        accept();
+        return {};
+    }
+    return await switchAction(ctx, side, accept);
+}
+
+const playerMoveAction = (side: SideID, actioned: PlayerActionsState) =>
+    unordered.createUnorderedDeadline(playerMoveActionImpl,
+        /*rejected*/ undefined, side, actioned);
+
+async function playerMoveActionImpl(ctx: BattleParserContext<"gen4">,
+    accept: unordered.AcceptCallback, side: SideID,
+    actioned: PlayerActionsState): Promise<MoveActionResult>
+{
+    if (actioned[side])
+    {
+        accept();
+        return {};
+    }
+    return await moveAction(ctx, side, accept);
+}
 
 /** Consumes ignored events until the end of player actions. */
-async function filter(ctx: BattleParserContext<"gen4">, accept: () => void)
+async function filter(ctx: BattleParserContext<"gen4">,
+    accept: unordered.AcceptCallback)
 {
     await eventLoop(ctx,
         async function filterLoop(_ctx)
@@ -66,10 +93,8 @@ async function filter(ctx: BattleParserContext<"gen4">, accept: () => void)
                 case "win": case "tie":
                     accept();
                     // fallthrough
-                // allowed events
-                case "move": // TODO
-                    break;
                 default:
+                    if (isAllowedKey(Protocol.key(event.args))) break;
                     await consume(ctx);
             }
         });

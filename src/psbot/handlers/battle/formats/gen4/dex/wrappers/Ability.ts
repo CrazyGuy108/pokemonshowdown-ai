@@ -3,7 +3,7 @@ import { BattleParserContext, consume, inference, tryPeek, verify } from
 import { SideID } from "@pkmn/types";
 import { dispatch, handlers as base } from "../../parser/base";
 import { chanceReason, diffMoveType, moveIsType, opponentHasItem } from
-    "../../parser/helpers";
+    "../../parser/reason";
 import * as parsers from "../../parser/parsers";
 import { Pokemon, ReadonlyPokemon } from "../../state/Pokemon";
 import { AbilityData } from "../dex-util";

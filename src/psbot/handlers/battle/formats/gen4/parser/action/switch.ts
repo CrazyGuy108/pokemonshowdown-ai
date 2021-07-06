@@ -7,7 +7,7 @@ import { BattleParserContext, consume, tryVerify, unordered, verify } from
 import { Pokemon } from "../../state/Pokemon";
 import { SwitchOptions } from "../../state/Team";
 import { ActionResult } from "./action";
-import { interceptSwitch, MoveResult } from "./move";
+import { interceptSwitch, MoveActionResult } from "./move";
 
 /** Result of {@link switchAction} and {@link selfSwitch}. */
 export interface SwitchActionResult extends ActionResult
@@ -17,14 +17,16 @@ export interface SwitchActionResult extends ActionResult
 }
 
 /**
- * Creates an UnorderedDeadline parser for handling a switch choice.
- * @param side Player id.
- * @param reject Optional callback if this never happens.
+ * Parses a switch-in action by player choice. Includes effects that could
+ * happen before the main `|switch|` event.
+ * @param side Player that should be making the switch action.
+ * @param accept Callback to accept this pathway.
  */
-export function switchAction(side: SideID, reject?: () => void)
+export async function switchAction(ctx: BattleParserContext<"gen4">,
+    side: SideID, accept?: unordered.AcceptCallback):
+    Promise<SwitchActionResult>
 {
-    return unordered.createUnorderedDeadline(
-        (ctx, accept) => switchActionImpl(ctx, side, accept), reject);
+    return await switchActionImpl(ctx, side, accept);
 }
 
 /**
@@ -68,11 +70,11 @@ async function multipleSwitchEffects(ctx: BattleParserContext<"gen4">,
 
 const unorderedSwitchEffects = (mon: Pokemon) =>
     unordered.createUnorderedDeadline(
-        async function multipleSwitchEffectsParser(ctx, accept)
+        async function unorderedSwitchEffectsImpl(ctx, accept)
         {
             return await switchEffects(ctx, mon, accept);
         },
-        function multipleSwitchEffectsReject()
+        function unorderedSwitchEffectsReject()
         {
             throw new Error(`Expected switch effects for ` +
                 `'${mon.team!.side}': ${mon.species}`);
@@ -84,10 +86,10 @@ const unorderedSwitchEffects = (mon: Pokemon) =>
  * @param side Player that should be making the switch action.
  * @param accept Callback to accept this pathway.
  */
-async function switchActionImpl(ctx: BattleParserContext<"gen4">,
-    side: SideID, accept?: () => void): Promise<SwitchActionResult>
+async function switchActionImpl(ctx: BattleParserContext<"gen4">, side: SideID,
+    accept?: unordered.AcceptCallback): Promise<SwitchActionResult>
 {
-    const res: SwitchActionResult = {actioned: {[side]: true}};
+    const res: SwitchActionResult = {};
     // accept cb gets consumed if one of the optional pre-switch effects accept
     // once it gets called the first time, subsequent uses of this value should
     //  be ignored since we'd now be committing to this pathway
@@ -99,12 +101,16 @@ async function switchActionImpl(ctx: BattleParserContext<"gen4">,
     };
 
     const interceptRes = await preSwitch(ctx, side, accept);
-    if (interceptRes) Object.assign(res.actioned, interceptRes.actioned);
+    if (interceptRes) Object.assign(res.actioned ??= {}, interceptRes.actioned);
 
     // expect the actual switch-in
-    const mon = await (accept ?
-            switchIn(ctx, side, accept) : switchIn(ctx, side));
-    if (mon) res.mon = mon;
+    const mon = await
+        (accept ? switchIn(ctx, side, accept) : switchIn(ctx, side));
+    if (mon)
+    {
+        res.mon = mon;
+        (res.actioned ??= {})[side] = true;
+    }
     return res;
 }
 
@@ -115,7 +121,7 @@ async function switchActionImpl(ctx: BattleParserContext<"gen4">,
  * @returns The result of a switch-interception move action, if found.
  */
 async function preSwitch(ctx: BattleParserContext<"gen4">, side: SideID,
-    accept?: () => void): Promise<MoveResult>
+    accept?: unordered.AcceptCallback): Promise<MoveActionResult>
 {
     accept &&= function preSwitchAccept()
     {
@@ -148,7 +154,7 @@ async function preSwitch(ctx: BattleParserContext<"gen4">, side: SideID,
  * @returns The Pokemon that was switched in, or null if not accepted.
  */
 export async function switchIn(ctx: BattleParserContext<"gen4">,
-    side: SideID, accept: () => void): Promise<Pokemon | null>;
+    side: SideID, accept: unordered.AcceptCallback): Promise<Pokemon | null>;
 /**
  * Parses a single `|switch|`/`|drag|` event and its implications.
  * @param side Player that should be making the switch action. Omit to skip this
@@ -158,7 +164,7 @@ export async function switchIn(ctx: BattleParserContext<"gen4">,
 export async function switchIn(ctx: BattleParserContext<"gen4">,
     side?: SideID): Promise<Pokemon>;
 export async function switchIn(ctx: BattleParserContext<"gen4">,
-    side?: SideID, accept?: () => void): Promise<Pokemon | null>
+    side?: SideID, accept?: unordered.AcceptCallback): Promise<Pokemon | null>
 {
     const mon = await switchEvent(ctx, side, accept);
     if (mon) await switchEffects(ctx, mon);
@@ -175,7 +181,7 @@ export async function switchIn(ctx: BattleParserContext<"gen4">,
  * `accept` was specified.
  */
 async function switchEvent(ctx: BattleParserContext<"gen4">,
-    side?: SideID, accept?: () => void): Promise<Pokemon | null>
+    side?: SideID, accept?: unordered.AcceptCallback): Promise<Pokemon | null>
 {
     let event: Event<"|switch|" | "|drag|">;
     if (accept)
@@ -227,7 +233,7 @@ async function switchEvent(ctx: BattleParserContext<"gen4">,
  * @param accept Optional accept cb.
  */
 async function switchEffects(ctx: BattleParserContext<"gen4">,
-    mon: Pokemon, accept?: () => void): Promise<void>
+    mon: Pokemon, accept?: unordered.AcceptCallback): Promise<void>
 {
 
     // TODO

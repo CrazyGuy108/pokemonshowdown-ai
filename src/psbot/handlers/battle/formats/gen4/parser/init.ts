@@ -35,7 +35,7 @@ export async function init(ctx: BattleParserContext<"gen4">)
  */
 const initBattle = () =>
     unordered.createUnorderedDeadline(
-        async function initBattleParser(ctx, accept)
+        async function initBattleImpl(ctx, accept)
         {
             const event = await tryVerify(ctx, "|init|");
             if (!event) return;
@@ -51,7 +51,7 @@ const initBattle = () =>
 
 const gameType = () =>
     unordered.createUnorderedDeadline(
-        async function gameTypeParser(ctx, accept)
+        async function gameTypeImpl(ctx, accept)
         {
             const event = await tryVerify(ctx, "|gametype|");
             if (!event) return;
@@ -68,7 +68,7 @@ const gameType = () =>
 
 const player = (num: 1 | 2) =>
     unordered.createUnorderedDeadline(
-        async function playerParser(ctx, accept)
+        async function playerImpl(ctx, accept)
         {
             const event = await tryVerify(ctx, "|player|");
             if (!event || event.args[1] !== `p${num}` as const) return;
@@ -84,7 +84,7 @@ const player = (num: 1 | 2) =>
 
 const request = (first?: boolean) =>
     unordered.createUnorderedDeadline(
-        async function requestParser(ctx, accept)
+        async function requestImpl(ctx, accept)
         {
             const event = await tryVerify(ctx, "|request|");
             if (!event) return;
@@ -102,7 +102,7 @@ const request = (first?: boolean) =>
 
 const teamSize = (num: 1 | 2) =>
     unordered.createUnorderedDeadline(
-        async function teamSizeParser(ctx, accept)
+        async function teamSizeImpl(ctx, accept)
         {
             const event = await tryVerify(ctx, "|teamsize|");
             if (!event || event.args[1] !== `p${num}` as const) return;
@@ -121,7 +121,7 @@ const teamSize = (num: 1 | 2) =>
 
 const gen = (num: GenerationNum) =>
     unordered.createUnorderedDeadline(
-        async function genParser(ctx, accept)
+        async function genImpl(ctx, accept)
         {
             const event = await tryVerify(ctx, "|gen|");
             if (!event) return;
@@ -139,7 +139,7 @@ const gen = (num: GenerationNum) =>
 
 const tier = () =>
     unordered.createUnorderedDeadline(
-        async function tierParser(ctx, accept)
+        async function tierImpl(ctx, accept)
         {
             const event = await tryVerify(ctx, "|tier|");
             if (!event) return;
@@ -151,7 +151,7 @@ const tier = () =>
 
 const rules = () =>
     unordered.createUnorderedDeadline(
-        async function ruleParser(ctx, accept)
+        async function rulesImpl(ctx, accept)
         {
             let event = await tryVerify(ctx, "|rule|");
             if (!event) return;

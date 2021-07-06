@@ -8,17 +8,18 @@ import * as dex from "../../dex";
 import { ActionResult } from "./action";
 
 /** Result of {@link moveAction} and {@link interceptSwitch}. */
-export type MoveResult = ActionResult;
+export type MoveActionResult = ActionResult;
 
 /**
- * Creates an UnorderedDeadline parser for handling a move choice.
+ * Parses a possible move action by player choice. Includes effects that could
+ * happen before the main `|move|` event.
  * @param side Player id.
- * @param reject Optional callback if this never happens.
  */
-export function moveAction(side: SideID, reject?: () => void)
+export async function moveAction(ctx: BattleParserContext<"gen4">,
+    side: SideID, accept?: unordered.AcceptCallback):
+    Promise<MoveActionResult>
 {
-    return unordered.createUnorderedDeadline(
-        (ctx, accept) => moveActionImpl(ctx, side, accept), reject);
+    return await moveActionImpl(ctx, side, accept);
 }
 
 /**
@@ -29,8 +30,8 @@ export function moveAction(side: SideID, reject?: () => void)
  * already committed.
  */
 export async function interceptSwitch(ctx: BattleParserContext<"gen4">,
-    intercepting: SideID, intercepted: SideID, accept?: () => void):
-    Promise<MoveResult>
+    intercepting: SideID, intercepted: SideID,
+    accept?: unordered.AcceptCallback): Promise<MoveActionResult>
 {
     return await moveActionImpl(ctx, intercepting, accept, intercepted);
 }
@@ -44,9 +45,10 @@ export async function interceptSwitch(ctx: BattleParserContext<"gen4">,
  * Pokemon being interrupted.
  */
 async function moveActionImpl(ctx: BattleParserContext<"gen4">,
-    side: SideID, accept?: () => void, intercept?: SideID): Promise<MoveResult>
+    side: SideID, accept?: unordered.AcceptCallback, intercept?: SideID):
+    Promise<MoveActionResult>
 {
-    const res: MoveResult = {};
+    const res: MoveActionResult = {};
     // accept cb gets consumed if one of the optional pre-move effects accept
     // once it gets called the first time, subsequent uses of this value should
     //  be ignored since we'd now be committing to this pathway
@@ -86,7 +88,7 @@ async function moveActionImpl(ctx: BattleParserContext<"gen4">,
  * `"inactive"`. Otherwise undefined.
  */
 async function preMove(ctx: BattleParserContext<"gen4">, side: SideID,
-    accept?: () => void, intercept?: SideID):
+    accept?: unordered.AcceptCallback, intercept?: SideID):
     Promise<dex.Move | "move" | "inactive" | undefined>
 {
     let res: dex.Move | "move" | "inactive" | undefined;
@@ -133,7 +135,8 @@ async function preMove(ctx: BattleParserContext<"gen4">, side: SideID,
  * wasn't found.
  */
 async function interceptSwitchEvent(ctx: BattleParserContext<"gen4">,
-    intercept: SideID, accept?: () => void): Promise<dex.Move | undefined>
+    intercept: SideID, accept?: unordered.AcceptCallback):
+    Promise<dex.Move | undefined>
 {
     const event = await tryVerify(ctx, "|-activate|");
     if (!event) return;
@@ -161,7 +164,8 @@ async function interceptSwitchEvent(ctx: BattleParserContext<"gen4">,
  * @param accept Optional callback to accept this pathway.
  */
 export async function useMove(ctx: BattleParserContext<"gen4">, side?: SideID,
-    move?: dex.Move | "recharge", accept?: () => void): Promise<void>
+    move?: dex.Move | "recharge", accept?: unordered.AcceptCallback):
+    Promise<void>
 {
     const event = await verify(ctx, "|move|");
     const [_, identStr, moveName] = event.args;
