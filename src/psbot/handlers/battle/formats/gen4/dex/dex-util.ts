@@ -609,11 +609,11 @@ export type CountableStatusType = "perish" | "stockpile";
 
 /** Status effects that are explicitly started/ended in game events. */
 export type StatusType = UpdatableStatusType | SingleMoveType |
-    SingleTurnType | MajorStatus | "aquaRing" | "attract" | "charge" |
-    "curse" | "embargo" | "encore" | "flashFire" | "focusEnergy" | "foresight" |
-    "healBlock" | "imprison" | "ingrain" | "leechSeed" | "magnetRise" |
-    "miracleEye" | "mudSport" | "nightmare" | "powerTrick" | "slowStart" |
-    "substitute" | "suppressAbility" | "taunt" | "torment" | "waterSport" |
+    SingleTurnType | MajorStatus | "aquaring" | "attract" | "charge" |
+    "curse" | "embargo" | "encore" | "flashfire" | "focusenergy" | "foresight" |
+    "healblock" | "imprison" | "ingrain" | "leechseed" | "magnetrise" |
+    "miracleeye" | "mudsport" | "nightmare" | "powertrick" | "slowstart" |
+    "substitute" | "suppressAbility" | "taunt" | "torment" | "watersport" |
     "yawn";
 
 /**
@@ -623,10 +623,10 @@ export type StatusType = UpdatableStatusType | SingleMoveType |
 export type UpdatableStatusType = "confusion" | "bide" | "uproar";
 
 /** Types of single-move effects. */
-export type SingleMoveType = "destinyBond" | "grudge" | "rage";
+export type SingleMoveType = "destinybond" | "grudge" | "rage";
 
 /** Types of single-turn effects. */
-export type SingleTurnType = "endure" | "focus" | "magicCoat" | "protect" |
+export type SingleTurnType = "endure" | "focus" | "magiccoat" | "protect" |
     "roost" | "snatch";
 
 /** Team status effects that are explicitly started/ended in game events. */

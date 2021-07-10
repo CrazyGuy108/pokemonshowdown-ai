@@ -125,7 +125,7 @@ export async function oneOf
 >(
     ctx: BattleParserContext<T, TAgent>,
     parsers: UnorderedDeadline<T, TAgent, TResult>[], ...args: TArgs):
-    Promise<[false] | [true, TResult]>
+    Promise<[ok: false] | [ok: true, result: TResult]>
 {
     for (const parser of parsers)
     {

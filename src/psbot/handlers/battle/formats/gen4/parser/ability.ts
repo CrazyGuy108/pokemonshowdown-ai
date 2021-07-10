@@ -2,19 +2,23 @@ import { Protocol } from "@pkmn/protocol";
 import { SideID } from "@pkmn/types";
 import { toIdName } from "../../../../../helpers";
 import { Event } from "../../../../../parser";
-import { BattleParserContext, consume, inference, peek, verify } from
+import { BattleAgent } from "../../../agent";
+import { BattleParserContext, consume, inference, unordered, verify } from
     "../../../parser";
 import * as dex from "../dex";
 import { Pokemon } from "../state/Pokemon";
 import { hasAbility } from "./reason/ability";
+
+/** UnorderedDeadline type for ability onX() functions. */
+type AbilityParser =
+    unordered.UnorderedDeadline<"gen4", BattleAgent<"gen4">, dex.Ability>;
 
 /**
  * Creates an EventInference parser that expects an on-`switchOut` ability to
  * activate if possible.
  * @param side Pokemon reference who could have such an ability.
  */
-export async function onSwitchOut(ctx: BattleParserContext<"gen4">,
-    side: SideID)
+export function onSwitchOut(ctx: BattleParserContext<"gen4">, side: SideID)
 {
     const mon = ctx.state.getTeam(side).active;
     const abilities = getAbilities(mon, ability => ability.canSwitchOut(mon))
@@ -26,9 +30,105 @@ async function onSwitchOutImpl(ctx: BattleParserContext<"gen4">,
     accept: inference.AcceptCallback, side: SideID,
     abilities: Map<dex.Ability, inference.SubInference>)
 {
-    const event = await peek(ctx);
-    // TODO: check for on-switchout ability effects
-    // TODO: event format?
+    const parsers: AbilityParser[] = [];
+    for (const ability of abilities.keys())
+    {
+        parsers.push(unordered.createUnorderedDeadline(onSwitchOutUnordered,
+                /*reject*/ undefined, ability, side));
+    }
+
+    const [ok, acceptedAbility] = await unordered.oneOf(ctx, parsers);
+    if (ok) accept(abilities.get(acceptedAbility!)!);
+}
+
+async function onSwitchOutUnordered(ctx: BattleParserContext<"gen4">,
+    accept: unordered.AcceptCallback, ability: dex.Ability, side: SideID):
+    Promise<dex.Ability>
+{
+    await ability.onSwitchOut(ctx, accept, side);
+    return ability;
+}
+
+// ambiguous? on-start (trace X, X)
+    // trace X
+        // X events
+        // trace event
+    // X
+        // ...
+// solutions:
+    // chunk-level MessageParser
+        // lookahead for trace events
+        // move them to the beginning of an ability activation
+            // how to tentatively parse ability activations?
+    // or: onStart level
+        // Ability.onStart() returns true if it parsed, false otherwise
+            // or could just pass in a custom accept cb
+        // keep trace out of the onStartImpl unordered.oneOf list
+        // if possibly-traced event parses first, lookahead for trace event
+            // basically by calling traceAbility.onStart() at this point
+            // should return ability string that was found
+        // if found:
+            // set trace as base ability
+            // set parsed ability (from returned info) as override ability
+        // else:
+            // 
+
+/**
+ * Creates an EventInference parser that expects an on-`start` ability to
+ * activate if possible.
+ * @param side Pokemon reference who could have such an ability.
+ */
+export function onStart(ctx: BattleParserContext<"gen4">, side: SideID)
+{
+    const mon = ctx.state.getTeam(side).active;
+    const abilities = getAbilities(mon, ability => ability.canStart(mon))
+    return new inference.EventInference(new Set(abilities.values()),
+        onStartImpl, side, abilities);
+}
+
+async function onStartImpl(ctx: BattleParserContext<"gen4">,
+    accept: inference.AcceptCallback, side: SideID,
+    abilities: Map<dex.Ability, inference.SubInference>): Promise<void>
+{
+    const parsers: AbilityParser[] = [];
+    let trace: dex.Ability | undefined;
+    for (const ability of abilities.keys())
+    {
+        if (ability.data.on?.start?.copyFoeAbility) // trace ability
+        {
+            // NOTE(gen4): traced ability is shown before trace ability itself
+            // parse the possibly-traced ability first before seeing if it was
+            // traced
+            trace = ability;
+            continue;
+        }
+        parsers.push(unordered.createUnorderedDeadline(onStartUnordered,
+                /*reject*/ undefined, ability, side));
+    }
+
+    const [ok, acceptedAbility] = await unordered.oneOf(ctx, parsers);
+    if (!ok) return;
+
+    if (trace)
+    {
+        const traced = await trace.copyFoeAbility(ctx, side);
+        if (traced)
+        {
+            ctx.state.getTeam(traced.side).active.setAbility(traced.ability);
+            accept(abilities.get(trace)!);
+            return;
+        }
+    }
+
+    accept(abilities.get(acceptedAbility!)!);
+}
+
+async function onStartUnordered(ctx: BattleParserContext<"gen4">,
+    accept: unordered.AcceptCallback, ability: dex.Ability, side: SideID):
+    Promise<dex.Ability>
+{
+    await ability.onStart(ctx, accept, side);
+    return ability;
 }
 
 /**
@@ -56,27 +156,6 @@ function getAbilities(mon: Pokemon,
         res.set(ability, new inference.SubInference(reasons));
     }
     return res;
-}
-
-/**
- * Creates an EventInference that expects an ability activation.
- * @param accept Callback to accept one of the provided ability pathways.
- * @param on Context in which the ability would activate.
- * @param side Pokemon reference who could have such an ability.
- * @param abilities Eligible ability pathways.
- * @param hitBy Move and user-ref that hit the ability holder with a move, if
- * applicable.
- */
-async function activateAbility(ctx: BattleParserContext<"gen4">,
-    accept: inference.AcceptCallback, on: dex.AbilityOn, side: SideID,
-    abilities: ReadonlyMap<dex.Ability, inference.SubInference>,
-    hitBy?: dex.MoveAndUserRef)
-{
-    switch (on)
-    {
-        case "switchOut":
-
-    }
 }
 
 /**
