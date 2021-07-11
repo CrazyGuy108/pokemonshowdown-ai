@@ -1,6 +1,6 @@
+import { SideID } from "@pkmn/types";
 import { Pokemon, ReadonlyPokemon } from "../../state/Pokemon";
 import { ReadonlyPossibilityClass } from "../../state/PossibilityClass";
-import { Side } from "../../state/Side";
 import * as dexutil from "../dex-util";
 
 /** Limited form of the `ReadonlyPokemon` interface. */
@@ -15,7 +15,7 @@ export interface MoveAndUserRef
     /** Move object. */
     readonly move: Move;
     /** Pokemon reference to the move's user. */
-    readonly userRef: Side;
+    readonly userRef: SideID;
 }
 
 /** Readonly form of `MoveAndUser`. */
@@ -254,6 +254,7 @@ export class Move
         }
     }
 
+    // TODO: separate method to replace negative param?
     /**
      * Makes inferences to support the assertion that, if this Move was used by
      * the given Pokemon, the Move would be of one of the given types, or the

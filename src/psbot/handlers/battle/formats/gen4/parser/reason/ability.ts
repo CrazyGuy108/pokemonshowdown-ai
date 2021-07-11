@@ -68,6 +68,13 @@ class HasAbility extends inference.SubReason
     }
 
     /** @override */
+    public canHold(): boolean | null
+    {
+        return subsetOrIndependent(this.abilities, this.ability.possibleValues,
+            this.negative);
+    }
+
+    /** @override */
     public assert(): void
     {
         if (this.negative) this.rejectImpl();

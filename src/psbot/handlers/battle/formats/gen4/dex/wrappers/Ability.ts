@@ -1,14 +1,34 @@
 import { Protocol } from "@pkmn/protocol";
 import { SideID } from "@pkmn/types";
+import { Type, WeatherType } from "..";
 import { toIdName } from "../../../../../../helpers";
 import { Event } from "../../../../../../parser";
 import { BattleParserContext, consume, eventLoop, inference, tryPeek, tryVerify,
     unordered, verify } from "../../../../parser";
 import { dispatch, handlers as base } from "../../parser/base";
-import { hasAnItem } from "../../parser/reason";
+import { boost } from "../../parser/effect/boost";
+import { isPercentDamageSilent, verifyPercentDamage } from
+    "../../parser/effect/damage";
+import { isStatusSilent, verifyStatus } from "../../parser/effect/status";
+import { chance, hasAnItem, moveIsType } from "../../parser/reason";
 import { Pokemon, ReadonlyPokemon } from "../../state/Pokemon";
 import { getMove } from "../dex";
-import { AbilityData, StatusType } from "../dex-util";
+import { AbilityData, BoostTable, StatusType } from "../dex-util";
+import { Move, MoveAndUserRef } from "./Move";
+
+/** Result from `Ability#onBlock(). */
+export interface AbilityBlockResult
+{
+    /** Statuses to block. */
+    blockStatus?: {[T in StatusType]?: true};
+    /**
+     * Whether the ability activated to grant an immunity to the move being used
+     * against the holder.
+     */
+    immune?: true;
+    /** Whether the ability caused the move to fail completely. */
+    failed?: true;
+}
 
 /** Encapsulates ability properties. */
 export class Ability
@@ -45,13 +65,11 @@ export class Ability
     public async onSwitchOut(ctx: BattleParserContext<"gen4">,
         accept: unordered.AcceptCallback, side: SideID): Promise<void>
     {
-        if (this.data.on?.switchOut)
+        if (!this.data.on?.switchOut) return;
+        // cure major status
+        if (this.data.on.switchOut.cure)
         {
-            // cure major status
-            if (this.data.on.switchOut.cure)
-            {
-                return await this.cureMajorStatus(ctx, accept, side);
-            }
+            return await this.cureMajorStatus(ctx, accept, side);
         }
     }
 
@@ -61,7 +79,7 @@ export class Ability
         accept: unordered.AcceptCallback, side: SideID): Promise<void>
     {
         const event = await verify(ctx, "|-curestatus|");
-        const [_, identStr] = event.args;
+        const [, identStr] = event.args;
         const ident = Protocol.parsePokemonIdent(identStr);
         // TODO: provide reasons for failure to parse
         if (ident.player !== side) return;
@@ -117,32 +135,28 @@ export class Ability
     public async onStart(ctx: BattleParserContext<"gen4">,
         accept: unordered.AcceptCallback, side: SideID): Promise<void>
     {
-        if (this.data.on?.start)
+        if (!this.data.on?.start) return;
+        // cure status immunity
+        if (this.data.on.start.cure)
         {
-            // cure status immunity
-            if (this.data.on.start.cure)
-            {
-                return await this.cureImmunity(ctx, accept, side);
-            }
-            // NOTE(gen4): trace is handled using other special logic found in
-            //  #copyFoeAbility() and gen4/parser/ability.ts' onStart() function
-            //  where this is called
-            if (this.data.on.start?.copyFoeAbility) return;
-            // frisk
-            if (this.data.on.start.revealItem)
-            {
-                return await this.revealItem(ctx, accept, side);
-            }
-            // forewarn
-            if (this.data.on.start.warnStrongestMove)
-            {
-                return await this.warnStrongestMove(ctx, accept, side);
-            }
-            // if nothing is set, then the ability just reveals itself
-            // TODO: pressure/moldbreaker
-            // TODO: -ability event
-            return await this.revealAbility(ctx, accept, side);
+            return await this.cureImmunity(ctx, accept, side);
         }
+        // NOTE(gen4): trace is handled using other special logic found in
+        //  #copyFoeAbility() and gen4/parser/ability.ts' onStart() function
+        //  where this is called
+        if (this.data.on.start?.copyFoeAbility) return;
+        // frisk
+        if (this.data.on.start.revealItem)
+        {
+            return await this.revealItem(ctx, accept, side);
+        }
+        // forewarn
+        if (this.data.on.start.warnStrongestMove)
+        {
+            return await this.warnStrongestMove(ctx, accept, side);
+        }
+        // if nothing is set, then the ability just reveals itself
+        return await this.revealAbility(ctx, accept, side);
     }
 
     /**
@@ -159,7 +173,7 @@ export class Ability
         //  gen4/parser/ability.ts' onStart() function where this is called
         const event = await tryVerify(ctx, "|-ability|");
         if (!event) return;
-        const [_, identStr, abilityName] = event.args;
+        const [, identStr, abilityName] = event.args;
         const ident = Protocol.parsePokemonIdent(identStr);
         if (ident.player !== side) return;
         if (!this.isEventFromAbility(event)) return;
@@ -191,7 +205,7 @@ export class Ability
             {
                 case "-end":
                 {
-                    const [_, identStr, effectStr] = event.args;
+                    const [, identStr, effectStr] = event.args;
                     const ident = Protocol.parsePokemonIdent(identStr);
                     if (ident.player !== side) break;
                     const effect = Protocol.parseEffect(effectStr, toIdName);
@@ -206,10 +220,10 @@ export class Ability
                 }
                 case "-curestatus":
                 {
-                    const [_, identStr, status] = event.args;
+                    const [, identStr, majorStatusType] = event.args;
                     const ident = Protocol.parsePokemonIdent(identStr);
                     if (ident.player !== side) break;
-                    if (immunities[status] !== true) break;
+                    if (immunities[majorStatusType] !== true) break;
                     if (!this.isEventFromAbility(
                             event as Event<"|-curestatus|">))
                     {
@@ -234,7 +248,7 @@ export class Ability
         // TODO(doubles): same event format for each opponent
         const event = await tryVerify(ctx, "|-item|");
         if (!event) return;
-        const [_, targetIdentStr, itemName] = event.args;
+        const [, targetIdentStr, itemName] = event.args;
         const targetIdent = Protocol.parsePokemonIdent(targetIdentStr);
         const itemId = toIdName(itemName);
         if (!this.isEventFromAbility(event)) return;
@@ -257,7 +271,7 @@ export class Ability
     {
         const event = await tryVerify(ctx, "|-activate|");
         if (!event) return;
-        const [_, identStr, effectStr, warnMoveName] = event.args;
+        const [, identStr, effectStr, warnMoveName] = event.args;
         if (!identStr) return;
         const ident = Protocol.parsePokemonIdent(identStr);
         if (ident.player !== side) return;
@@ -313,184 +327,360 @@ export class Ability
         accept: unordered.AcceptCallback, side: SideID): Promise<void>
     {
         // TODO(doubles): same event format for each opponent
-        const event = await tryVerify(ctx, "|-item|");
+        const event = await tryVerify(ctx, "|-ability|");
         if (!event) return;
-        const [_, targetIdentStr, itemName] = event.args;
-        const targetIdent = Protocol.parsePokemonIdent(targetIdentStr);
-        const itemId = toIdName(itemName);
-        if (!this.isEventFromAbility(event)) return;
-        if (!event.kwArgs.of) return;
-        const holderIdent = Protocol.parsePokemonIdent(event.kwArgs.of);
-        if (holderIdent.player !== side) return;
-        if (!event.kwArgs.identify) return;
+        const [, identStr, abilityName] = event.args;
+        const ident = Protocol.parsePokemonIdent(identStr);
+        if (ident.player !== side) return;
+        const abilityId = toIdName(abilityName);
+        if (abilityId !== this.data.name) return;
         accept();
-        ctx.state.getTeam(targetIdent.player).active.setItem(itemId);
-        await consume(ctx);
+        await base["|-ability|"](ctx);
     }
 
     //#endregion
 
-    //#region on-block parser
+    //#region on-block
+
+    /**
+     * Checks whether the ability can activate on-`block` vs a status effect.
+     * @param statuses Possible statuses to afflict.
+     * @param weather Current weather.
+     * @returns A Set of SubReasons describing additional conditions of
+     * activation, or the empty set if there are none, or null if it cannot
+     * activate.
+     */
+    public canBlockStatusEffect(statuses: readonly StatusType[],
+        weather: WeatherType | "none"): Set<inference.SubReason> | null
+    {
+        return statuses.some(
+                s => this.canBlockStatus(s, weather, /*allowSilent*/ false)) ?
+            new Set() : null;
+    }
+
+    /**
+     * Checks whether the ability can block the given status.
+     * @param status Status to check.
+     * @param weather Current weather.
+     * @param allowSilent Whether to allow silent activation. Default true.
+     */
+    public canBlockStatus(status: StatusType,
+        weather: WeatherType | "none", allowSilent = true): boolean
+    {
+        const condition = this.data.on?.block?.status;
+        return (condition === true || condition === weather) &&
+            !!this.data.statusImmunity &&
+            (allowSilent ?
+                !!this.data.statusImmunity[status]
+                : this.data.statusImmunity[status] === true);
+    }
+
+    /**
+     * Checks whether the ability can activate on-`block` vs a move's type.
+     * @param types Possible move types.
+     * @returns A Set of SubReasons describing additional conditions of
+     * activation, or the empty set if there are none, or null if it cannot
+     * activate.
+     */
+    public canBlockMoveType(types: ReadonlySet<Type>, move: Move,
+        user: Pokemon): Set<inference.SubReason> | null
+    {
+        // TODO: type effectiveness assertions/SubReasons
+        if (this.data.on?.block?.move?.type === "nonSuper")
+        {
+            return new Set([chance]);
+        }
+        // side/field status moves don't count
+        // TODO: what about moves with additional effects that target the
+        //  holder?
+        if (move.data.category === "status" &&
+            (move.data.effects?.team || move.data.effects?.field))
+        {
+            return null;
+        }
+        // can't activate unless the ability could block one of the move's
+        //  possible types
+        const typeImmunity = this.getTypeImmunity();
+        if (!typeImmunity || !types.has(typeImmunity)) return null;
+        return new Set([moveIsType(move, user, new Set([typeImmunity]))]);
+    }
+
+    /**
+     * Checks whether the ability can activate on-`block` vs some effect.
+     * @param explosive Explosive flag for damp check.
+     * @returns A Set of SubReasons describing additional conditions of
+     * activation, or the empty set if there are none, or null if it cannot
+     * activate.
+     */
+    public canBlockEffect(explosive?: boolean): Set<inference.SubReason> | null
+    {
+        return explosive && this.data.on?.block?.effect?.explosive ?
+            new Set() : null;
+    }
 
     /**
      * Activates an ability on-`block`.
+     * @param accept Callback to accept this pathway.
      * @param side Ability holder reference.
-     * @param hitBy Move+user that the holder was hit by, if applicable.
+     * @param hitBy Move+user ref that the holder was hit by, if applicable.
      */
-    public async onBlock(ctx: BattleParserContext<"gen4">, side: SideID,
-        hitBy?: dexutil.MoveAndUserRef): Promise<AbilityResult>
+    public async onBlock(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID, hitBy?: MoveAndUserRef):
+        Promise<AbilityBlockResult>
     {
         // TODO: assert non-ignoreTargetAbility (moldbreaker) after handling
-        if (this.data.on?.block)
+        if (!this.data.on?.block) return {};
+        // block status
+        if (this.data.on.block.status)
         {
-            // block status
-            if (this.data.on.block.status)
-            {
-                return await this.blockStatus(ctx, side);
-            }
-            // block move type
-            if (this.data.on.block.move)
-            {
-                if (!hitBy)
-                {
-                    throw new Error("On-block move effect failed: " +
-                        "Attacking move not specified.");
-                }
-                const hitByUser = ctx.state.teams[hitBy.userRef].active;
-                return await this.blockMove(ctx, side, hitBy.move,
-                    hitByUser);
-            }
-            // block effect
-            if (this.data.on.block.effect)
-            {
-                return await this.blockEffect(ctx, side);
-            }
+            return await this.blockStatus(ctx, accept, side);
         }
-        throw new Error("On-block effect shouldn't activate for ability " +
-            `'${this.data.name}'`);
+        // block move type
+        if (this.data.on.block.move)
+        {
+            if (!hitBy) return {};
+            return await this.blockMove(ctx, accept, side, hitBy);
+        }
+        // block effect
+        if (this.data.on.block.effect)
+        {
+            if (!hitBy) return {};
+            return await this.blockEffect(ctx, accept, side, hitBy);
+        }
+        return {};
     }
 
     // onBlock() helpers
 
     /**
      * Handles events due to a status-blocking ability (e.g. Immunity).
+     * @param accept Callback to accept this pathway.
      * @param side Ability holder reference.
      */
-    private async blockStatus(ctx: BattleParserContext<"gen4">, side: SideID):
-        Promise<AbilityResult>
+    private async blockStatus(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID):
+        Promise<AbilityBlockResult>
     {
-        const statuses = this.data.statusImmunity;
-        if (statuses)
+        const blockData = this.data.on?.block?.status;
+        // istanbul ignore next: should never happen
+        if (!blockData) return {};
+        if (blockData !== true)
         {
-            // should have a fail or immune event
-            await this.verifyInitialEvent(ctx, side);
-            const next = await tryPeek(ctx);
-            if (next &&
-                (next.type === "fail" ||
-                    (next.type === "immune" && next.monRef === side)))
-            {
-                return {
-                    ...await dispatch(ctx, next),
-                    // silent blocked statuses are handled by a different parser
-                    blockStatus: Object.fromEntries(Object.entries(statuses)
-                            .filter(([, v]) => v === true))
-                };
-            }
+            // specify required weather in order to block (e.g. leafguard)
+            if (ctx.state.status.weather.type !== blockData) return {};
         }
-        throw new Error("On-block status effect failed");
+
+        const statuses = this.data.statusImmunity;
+        if (!statuses) return {};
+
+        const event = await tryVerify(ctx, "|-immune|");
+        if (!event) return {};
+        const [, identStr] = event.args;
+        const ident = Protocol.parsePokemonIdent(identStr);
+        if (ident.player !== side) return {};
+        if (!this.isEventFromAbility(event)) return {};
+        accept();
+        await dispatch(ctx);
+        // silent blocked statuses are handled by a different parser
+        return {
+            blockStatus: Object.fromEntries(Object.entries(statuses)
+                // note: Ability parsers only care about events, so ignore
+                //  silent blocked statuses since they're already implied
+                .filter(([, v]) => v === true))
+        };
     }
 
     /**
      * Handles events due to an ability immunity to a move (e.g. Water Absorb).
+     * @param accept Callback to accept this pathway.
      * @param side Ability holder reference.
-     * @param hitByMove Move the holder will be hit by.
-     * @param hitByUser User of the `hitByMove`.
+     * @param hitBy Move+user ref that the holder was hit by.
      */
-    private async blockMove(ctx: BattleParserContext<"gen4">, side: SideID,
-        hitByMove: dex.Move, hitByUser: Pokemon): Promise<AbilityResult>
+    private async blockMove(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID, hitBy: MoveAndUserRef):
+        Promise<AbilityBlockResult>
     {
         const blockData = this.data.on?.block?.move;
         // istanbul ignore next: should never happen
-        if (!blockData) throw new Error("On-block move effect failed");
+        if (!blockData) return {};
 
-        // TODO: type effectiveness assertion
+        // TODO: implement type effectiveness assertion for "nonSuper"
         if (blockData.type !== "nonSuper")
         {
-            hitByMove.assertType(blockData.type, hitByUser);
+            const hitByUser = ctx.state.getTeam(hitBy.userRef).active;
+            hitBy.move.assertType(blockData.type, hitByUser);
         }
 
-        await this.verifyInitialEvent(ctx, side);
+        // if no effects are being applied by the ability, just an |-immune|
+        //  event will be shown
+        const event = await tryVerify(ctx, "|-immune|");
+        if (event)
+        {
+            const [, identStr] = event.args;
+            const ident = Protocol.parsePokemonIdent(identStr);
+            if (ident.player !== side) return {};
+            if (!this.isEventFromAbility(event)) return {};
+            accept();
+            await base["|-immune|"](ctx);
+            return {immune: true};
+        }
 
-        let silent = true;
         // self-boost effect
         if (blockData.boost)
         {
-            const boostResult = await parsers.boost(ctx, side,
-                blockData.boost, /*set*/ false, /*silent*/ true);
-            if (Object.keys(boostResult.remaining).length > 0)
-            {
-                // TODO: specify errors
-                throw new Error("On-block move boost effect failed");
-            }
-            silent &&= !!boostResult.allSilent;
+            return await this.blockMoveBoost(ctx, accept, side,
+                blockData.boost);
         }
         // self-damage/heal effect
         if (blockData.percentDamage)
         {
-            const damageResult = await parsers.percentDamage(ctx, side,
-                blockData.percentDamage);
-            if (!damageResult.success)
-            {
-                throw new Error("On-block move percentDamage effect failed");
-            }
-            silent &&= damageResult.success === "silent";
+            return await this.blockMoveHeal(ctx, accept, side,
+                blockData.percentDamage, hitBy.userRef);
         }
         // self-status effect
         if (blockData.status)
         {
-            const statusResult = await parsers.status(ctx, side,
-                [blockData.status]);
-            if (!statusResult.success)
-            {
-                throw new Error("On-block move status effect failed");
-            }
-            silent &&= statusResult.success === true;
+            return await this.blockMoveStatus(ctx, accept, side,
+                blockData.status);
         }
+        return {};
+    }
 
-        // if the ability effects can't cause an explicit game event, then the
-        //  least it can do is give an immune event
-        if (silent)
+    /**
+     * Handles events due to an ability immunity causing a stat boost effect
+     * (e.g. Motor Drive).
+     * @param accept Callback to accept this pathway.
+     * @param side Ability holder reference.
+     * @param boosts Boosts to try to apply.
+     */
+    private async blockMoveBoost(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID,
+        boosts: Partial<BoostTable<number>>): Promise<AbilityBlockResult>
+    {
+        // parse initial event indicating boost effect
+        const event = await tryVerify(ctx, "|-ability|", "|-immune|");
+        if (!event) return {};
+
+        // if no boosts are being applied, just an |-immune| event will be shown
+        if (event.args[0] === "-immune")
         {
-            const next = await tryPeek(ctx);
-            if (next?.type !== "immune" || next.monRef !== side)
-            {
-                throw new Error("On-block move effect failed");
-            }
-            return {...await base.immune(ctx), immune: true};
+            const [, ident2Str] = event.args;
+            const ident2 = Protocol.parsePokemonIdent(ident2Str);
+            if (ident2.player !== side) return {};
+            if (!this.isEventFromAbility(event)) return {};
+            accept();
+            await base["|-immune|"](ctx);
+            return {immune: true};
         }
 
+        // otherwise, parse this initial event then the boost events
+        const [, identStr, abilityName, s] = event.args;
+        const ident = Protocol.parsePokemonIdent(identStr);
+        if (ident.player !== side) return {};
+        const abilityId = toIdName(abilityName);
+        if (this.data.name !== abilityId) return {};
+        if (s !== "boost") return {};
+        accept();
+        await base["|-ability|"](ctx);
+
+        // parse boost events
+        const remaining = await boost(ctx, {side, table: boosts, silent: true});
+        if (Object.keys(remaining).length > 0)
+        {
+            throw new Error("On-block move boost effect failed: " +
+                "Failed to parse boosts " +
+                `[${Object.keys(remaining).join(", ")}]`);
+        }
+        return {immune: true};
+    }
+
+    /**
+     * Handles events due to an ability immunity causing a healing effect
+     * (e.g. Water Absorb).
+     * @param accept Callback to accept this pathway.
+     * @param side Ability holder reference.
+     * @param percent Percent damage to apply.
+     * @param hitByUseRef User ref of the move the holder is being hit by.
+     */
+    private async blockMoveHeal(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID,
+        percent: number, hitByUseRef: SideID): Promise<AbilityBlockResult>
+    {
+        const mon = ctx.state.getTeam(side).active;
+        // effect would do nothing
+        if (isPercentDamageSilent(percent, mon.hp.current, mon.hp.max))
+        {
+            return {};
+        }
+
+        // parse initial event indicating heal effect
+        const event = await tryVerify(ctx, "|-heal|");
+        if (!event) return {};
+        if (!verifyPercentDamage(ctx, event, side, percent)) return {};
+        if (!this.isEventFromAbility(event)) return {};
+        if (!event.kwArgs.of) return {};
+        const identOf = Protocol.parsePokemonIdent(event.kwArgs.of);
+        if (identOf.player !== hitByUseRef) return {};
+        accept();
+        await base["|-heal|"](ctx);
+        return {immune: true};
+    }
+
+    /**
+     * Handles events due to an ability immunity causing a self-status effect
+     * (e.g. Flash Fire).
+     * @param accept Callback to accept this pathway.
+     * @param side Ability holder reference.
+     * @param statusType Status effect to apply.
+     */
+    private async blockMoveStatus(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID, statusType: StatusType):
+        Promise<AbilityBlockResult>
+    {
+        const mon = ctx.state.getTeam(side).active;
+        if (isStatusSilent(mon, [statusType])) return {};
+
+        const event = await tryVerify(ctx, "|-start|");
+        if (!event) return {};
+        if (!verifyStatus(event, side, [statusType])) return {};
+        if (!this.isEventFromAbility(event)) return {};
+        accept();
+        await base["|-start|"](ctx);
         return {immune: true};
     }
 
     /**
      * Handles events due to a certain effect type being blocked (e.g. Damp vs
      * Explosion)
+     * @param accept Callback to accept this pathway.
+     * @param side Ability holder reference.
+     * @param hitBy Move+user ref that the holder was hit by.
      */
-    private async blockEffect(ctx: BattleParserContext<"gen4">, side: SideID):
-        Promise<AbilityResult>
+    private async blockEffect(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID, hitBy: MoveAndUserRef):
+        Promise<AbilityBlockResult>
     {
+        // verify explosive flag
         const explosive = this.data.on?.block?.effect?.explosive;
+        if (explosive && !hitBy.move.data.flags?.explosive) return {};
 
-        // should see a fail event
-        await this.verifyInitialEvent(ctx, side);
-        const next = await tryPeek(ctx);
-        if (next?.type !== "fail")
-        {
-            throw new Error(`On-block effect${explosive ? " explosive" : ""} ` +
-                "failed");
-        }
+        // note: |move| event was shown prior
 
-        return {...await base.fail(ctx), failed: true};
+        const event = await tryVerify(ctx, "|cant|");
+        if (!event) return {};
+        const [, identStr, reasonStr, effectStr] = event.args;
+        const ident = Protocol.parsePokemonIdent(identStr);
+        if (ident.player !== hitBy.userRef) return {};
+        const reason = Protocol.parseEffect(reasonStr, toIdName);
+        if (reason.name !== this.data.name) return {};
+        const effect = Protocol.parseEffect(effectStr, toIdName);
+        if (effect.name !== hitBy.move.data.name) return {};
+        if (!event.kwArgs.of) return {};
+        const identOf = Protocol.parsePokemonIdent(event.kwArgs.of);
+        if (identOf.player !== side) return {};
+        accept();
+        await base["|cant|"](ctx);
+        return {failed: true};
     }
 
     //#endregion
@@ -785,14 +975,22 @@ export class Ability
 
     //#region general on-X parser helpers
 
-    /** Verifies that the event's `[from]` effect suffix matches the Ability. */
+    /**
+     * Verifies that the event's `[from]` effect suffix matches this Ability.
+     */
     private isEventFromAbility(event: Event<Protocol.BattleArgsWithKWArgName>):
         boolean
     {
         const from = Protocol.parseEffect((event.kwArgs as any).from, toIdName);
-        if (from.type && from.type !== "ability") return false;
-        if (from.name !== this.data.name) return false;
-        return true;
+        return this.isEffectFromAbility(from);
+    }
+
+    /** Verifies that a parsed effect string matches this Ability. */
+    private isEffectFromAbility(
+        effect: ReturnType<typeof Protocol["parseEffect"]>): boolean
+    {
+        return (!effect.type || effect.type === "ability") &&
+            effect.name === this.data.name;
     }
 
     //#endregion
@@ -800,70 +998,6 @@ export class Ability
     //#endregion
 
     //#region canX() SubReason builders for onX() activateAbility parsers
-
-    //#region on-block reason
-
-    /**
-     * Checks whether the ability can activate on-`block` vs a status effect.
-     * @param statuses Possible statuses to afflict.
-     * @param weather Current weather.
-     * @returns A Set of SubReasons describing additional conditions of
-     * activation, or the empty set if there are none, or null if it cannot
-     * activate.
-     */
-    public canBlockStatusEffect(statuses: readonly dexutil.StatusType[],
-        weather: dexutil.WeatherType | "none"):
-        Set<SubReason> | null
-    {
-        return statuses.some(
-                s => this.canBlockStatus(s, weather, /*allowSilent*/ false)) ?
-            new Set() : null;
-    }
-
-    /**
-     * Checks whether the ability can activate on-`block` vs a move's type.
-     * @param types Possible move types.
-     * @returns A Set of SubReasons describing additional conditions of
-     * activation, or the empty set if there are none, or null if it cannot
-     * activate.
-     */
-    public canBlockMoveType(types: ReadonlySet<dexutil.Type>, move: dex.Move,
-        user: Pokemon): Set<SubReason> | null
-    {
-        // TODO: type effectiveness assertions/subreasons
-        if (this.data.on?.block?.move?.type === "nonSuper")
-        {
-            return new Set([chanceReason]);
-        }
-        // side/field status moves don't count
-        // TODO: what about moves with additional effects that target the
-        //  holder?
-        if (move.data.category === "status" &&
-            (move.data.effects?.team || move.data.effects?.field))
-        {
-            return null;
-        }
-        // can't activate unless the ability could block one of the move's
-        //  possible types
-        const typeImmunity = this.getTypeImmunity();
-        if (!typeImmunity || !types.has(typeImmunity)) return null;
-        return new Set([moveIsType(move, user, new Set([typeImmunity]))]);
-    }
-
-    /**
-     * Checks whether the ability can activate on-`block` vs some effect.
-     * @param explosive Explosive flag for damp check.
-     * @returns A Set of SubReasons describing additional conditions of
-     * activation, or the empty set if there are none, or null if it cannot
-     * activate.
-     */
-    public canBlockEffect(explosive?: boolean): Set<SubReason> | null
-    {
-        return explosive && this.data.on?.block?.effect?.explosive ?
-            new Set() : null;
-    }
-
-    //#endregion
 
     //#region on-tryUnboost reason
 
@@ -996,23 +1130,6 @@ export class Ability
         }
         return statusTypes.some(s => this.data.statusImmunity![s] &&
             hasStatus(mon, s));
-    }
-
-    /**
-     * Checks whether the ability can block the given status.
-     * @param status Status to check.
-     * @param weather Current weather if applicable.
-     * @param allowSilent Whether to allow silent activation. Default true.
-     */
-    public canBlockStatus(status: dexutil.StatusType,
-        weather: dexutil.WeatherType | "none", allowSilent = true): boolean
-    {
-        const condition = this.data.on?.block?.status;
-        return (condition === true || condition === weather) &&
-            !!this.data.statusImmunity &&
-            (allowSilent ?
-                !!this.data.statusImmunity[status]
-                : this.data.statusImmunity[status] === true);
     }
 
     // TODO: generalize for multiple immunities, e.g. wonderguard

@@ -365,7 +365,7 @@ export class Pokemon implements ReadonlyPokemon
 
         // magnetrise lifts non-levitate/non-flying-types but is overridden by
         //  ironball and other prior checks
-        if (v?.magnetRise.isActive) return maybeGrounded ? null : false;
+        if (v?.magnetrise.isActive) return maybeGrounded ? null : false;
 
         // whether the return value cannot be true (similar to maybeGrounded)
         let maybeUngrounded = false;
@@ -473,7 +473,7 @@ export class Pokemon implements ReadonlyPokemon
             if (!teams.hasOwnProperty(sideId)) continue;
             const team = teams[sideId as SideID];
             if (!team) continue;
-            team.active.volatile.mirrorMove = null;
+            team.active.volatile.mirrormove = null;
         }
 
         // switch in new mon

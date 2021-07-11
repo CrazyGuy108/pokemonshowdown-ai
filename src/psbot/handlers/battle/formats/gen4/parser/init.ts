@@ -109,7 +109,7 @@ const teamSize = (num: 1 | 2) =>
             accept();
 
             // client's side should be initialized by the first |request| msg
-            const [_, sideId, sizeStr] = event.args;
+            const [, sideId, sizeStr] = event.args;
             if (ctx.state.ourSide !== sideId)
             {
                 const size = Number(sizeStr);
@@ -127,7 +127,7 @@ const gen = (num: GenerationNum) =>
             if (!event) return;
             accept();
 
-            const [_, genNum] = event.args;
+            const [, genNum] = event.args;
             if (num !== genNum)
             {
                 throw new Error(`Expected |gen|${num} event but got ` +

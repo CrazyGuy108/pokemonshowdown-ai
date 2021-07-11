@@ -34,7 +34,7 @@ export interface ReadonlyVolatileStatus
     // passed when copying
 
     /* Aqua Ring move status. */
-    readonly aquaRing: boolean;
+    readonly aquaring: boolean;
     /** Stat boost stages. */
     readonly boosts: dex.BoostTable<number>;
     /** Confusion status. */
@@ -44,11 +44,11 @@ export interface ReadonlyVolatileStatus
     /** Embargo move status. */
     readonly embargo: ReadonlyTempStatus;
     /** Focus Energy move status. */
-    readonly focusEnergy: boolean;
+    readonly focusenergy: boolean;
     /** Ingrain move status. */
     readonly ingrain: boolean;
     /** Leech Seed move status. */
-    readonly leechSeed: boolean;
+    readonly leechseed: boolean;
     /** Who is locked onto us. */
     readonly lockedOnBy: VolatileStatus | null;
     /** Who we are locking onto. */
@@ -56,7 +56,7 @@ export interface ReadonlyVolatileStatus
     /** Turn tracker for Lock-On target. */
     readonly lockOnTurns: ReadonlyTempStatus;
     /** Magnet Rise move status. */
-    readonly magnetRise: ReadonlyTempStatus;
+    readonly magnetrise: ReadonlyTempStatus;
     /** Nightmare move status. */
     readonly nightmare: boolean;
     /**
@@ -65,7 +65,7 @@ export interface ReadonlyVolatileStatus
      */
     readonly perish: number;
     /** Power Trick move status. */
-    readonly powerTrick: boolean;
+    readonly powertrick: boolean;
     /** Substitute move status. */
     readonly substitute: boolean;
     /** Whether the current ability is being suppressed. */
@@ -95,9 +95,9 @@ export interface ReadonlyVolatileStatus
     /** Whether the pokemon was directly damaged by a move this turn. */
     readonly damaged: boolean;
     /** Defense curl move status. */
-    readonly defenseCurl: boolean;
+    readonly defensecurl: boolean;
     /** Destiny Bond move status. */
-    readonly destinyBond: boolean;
+    readonly destinybond: boolean;
     /** Currently disabled move. */
     readonly disabled: ReadonlyMoveStatus;
     /**
@@ -106,13 +106,13 @@ export interface ReadonlyVolatileStatus
      */
     readonly encore: ReadonlyMoveStatus;
     /** Flash Fire ability effect. */
-    readonly flashFire: boolean;
+    readonly flashfire: boolean;
     /** Focus Punch pre-move effect. */
     readonly focus: boolean;
     /** Grudge move status. */
     readonly grudge: boolean;
     /** Heal Block move status. */
-    readonly healBlock: ReadonlyTempStatus;
+    readonly healblock: ReadonlyTempStatus;
     /** Foresight/Miracle Eye move status. */
     readonly identified: "foresight" | "miracleEye" | null;
     /** Imprison move status. */
@@ -128,16 +128,16 @@ export interface ReadonlyVolatileStatus
      */
     readonly lockedMove: ReadonlyVariableTempStatus<dex.LockedMove>;
     /** Whether the pokemon has used Magic Coat during this turn. */
-    readonly magicCoat: boolean;
+    readonly magiccoat: boolean;
     /** Micle Berry status. */
     readonly micleberry: boolean;
     /** Whether the pokemon has used Minimize while out. */
     readonly minimize: boolean;
     // TODO(non-single battles): use a list of [move, user] tuples
     /** Last move that targeted this slot for mirrormove purposes. */
-    readonly mirrorMove: string | null;
+    readonly mirrormove: string | null;
     /** Mud Sport move status. */
-    readonly mudSport: boolean;
+    readonly mudsport: boolean;
     /** Whether this pokemon must recharge on the next turn. */
     readonly mustRecharge: boolean;
     /**
@@ -156,7 +156,7 @@ export interface ReadonlyVolatileStatus
     /** Roost move effect (single turn). */
     readonly roost: boolean;
     /** First 5 turns of Slow Start ability. */
-    readonly slowStart: ReadonlyTempStatus;
+    readonly slowstart: ReadonlyTempStatus;
     /** Snatch move status. */
     readonly snatch: boolean;
     /** Whether we have successfully stalled this turn and the effect is up. */
@@ -178,7 +178,7 @@ export interface ReadonlyVolatileStatus
     /** Uproar move status. */
     readonly uproar: ReadonlyTempStatus;
     /** Water Sport move status. */
-    readonly waterSport: boolean;
+    readonly watersport: boolean;
     /** Whether the Truant ability will activate next turn. */
     readonly willTruant: boolean;
     /** Yawn move status. */
@@ -196,7 +196,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
     // passed when copying
 
     /** @override */
-    public aquaRing!: boolean;
+    public aquaring!: boolean;
 
     /** @override */
     public get boosts(): Writable<dex.BoostTable<number>>
@@ -214,13 +214,13 @@ export class VolatileStatus implements ReadonlyVolatileStatus
     public readonly embargo = new TempStatus("embargo", 5);
 
     /** @override */
-    public focusEnergy!: boolean;
+    public focusenergy!: boolean;
 
     /** @override */
     public ingrain!: boolean;
 
     /** @override */
-    public leechSeed!: boolean;
+    public leechseed!: boolean;
 
     /** @override */
     public get lockedOnBy(): VolatileStatus | null { return this._lockedOnBy; }
@@ -248,7 +248,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
     }
 
     /** @override */
-    public readonly magnetRise = new TempStatus("magnet rise", 5);
+    public readonly magnetrise = new TempStatus("magnet rise", 5);
 
     /** @override */
     public nightmare!: boolean;
@@ -262,7 +262,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
     private _perish!: number;
 
     /** @override */
-    public powerTrick!: boolean;
+    public powertrick!: boolean;
 
     /** @override */
     public substitute!: boolean;
@@ -311,10 +311,10 @@ export class VolatileStatus implements ReadonlyVolatileStatus
     public readonly charge = new TempStatus("charging", 2, /*silent*/true);
 
     /** @override */
-    public defenseCurl!: boolean;
+    public defensecurl!: boolean;
 
     /** @override */
-    public destinyBond!: boolean;
+    public destinybond!: boolean;
 
     /** @override */
     public get disabled(): ReadonlyMoveStatus { return this._disabled; }
@@ -357,7 +357,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
         {move: null, ts: new TempStatus("encored", 8)};
 
     /** @override */
-    public flashFire!: boolean;
+    public flashfire!: boolean;
 
     /** @override */
     public focus!: boolean;
@@ -366,7 +366,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
     public grudge!: boolean;
 
     /** @override */
-    public healBlock = new TempStatus("heal block", 5);
+    public healblock = new TempStatus("heal block", 5);
 
     /** @override */
     public identified!: "foresight" | "miracleEye" | null;
@@ -382,7 +382,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
         /*silent*/true);
 
     /** @override */
-    public magicCoat!: boolean;
+    public magiccoat!: boolean;
 
     /** @override */
     public micleberry!: boolean;
@@ -391,10 +391,10 @@ export class VolatileStatus implements ReadonlyVolatileStatus
     public minimize!: boolean;
 
     /** @override */
-    public mirrorMove!: string | null;
+    public mirrormove!: string | null;
 
     /** @override */
-    public mudSport!: boolean;
+    public mudsport!: boolean;
 
     /** @override */
     public mustRecharge!: boolean;
@@ -432,7 +432,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
     public roost!: boolean;
 
     /** @override */
-    public readonly slowStart = new TempStatus("slow start", 5);
+    public readonly slowstart = new TempStatus("slow start", 5);
 
     /** @override */
     public snatch!: boolean;
@@ -484,7 +484,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
     public readonly uproar = new TempStatus("uproar", 5);
 
     /** @override */
-    public waterSport!: boolean;
+    public watersport!: boolean;
 
     /** @override */
     public get willTruant(): boolean { return this._willTruant; }
@@ -527,7 +527,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
      */
     public clearPassable()
     {
-        this.aquaRing = false;
+        this.aquaring = false;
         this._boosts =
         {
             atk: 0, def: 0, spa: 0, spd: 0, spe: 0, accuracy: 0, evasion: 0
@@ -535,9 +535,9 @@ export class VolatileStatus implements ReadonlyVolatileStatus
         this.confusion.end();
         this.curse = false;
         this.embargo.end();
-        this.focusEnergy = false;
+        this.focusenergy = false;
         this.ingrain = false;
-        this.leechSeed = false;
+        this.leechseed = false;
         // clear opponent's lockon status
         if (this._lockedOnBy)
         {
@@ -549,10 +549,10 @@ export class VolatileStatus implements ReadonlyVolatileStatus
         if (this._lockOnTarget) this._lockOnTarget._lockedOnBy = null;
         this._lockOnTarget = null;
         this._lockOnTurns.end();
-        this.magnetRise.end();
+        this.magnetrise.end();
         this.nightmare = false;
         this._perish = 0;
-        this.powerTrick = false;
+        this.powertrick = false;
         this.substitute = false;
         this.suppressAbility = false;
         // clear opponent's trapping status
@@ -577,22 +577,22 @@ export class VolatileStatus implements ReadonlyVolatileStatus
         this.charge.end();
         this.choiceLock = null;
         this.damaged = false;
-        this.defenseCurl = false;
-        this.destinyBond = false;
+        this.defensecurl = false;
+        this.destinybond = false;
         this.enableMoves();
         this.removeEncore();
-        this.flashFire = false;
+        this.flashfire = false;
         this.focus = false;
         this.grudge = false;
-        this.healBlock.end();
+        this.healblock.end();
         this.identified = null;
         this.imprison = false;
         this.lockedMove.reset();
-        this.magicCoat = false;
+        this.magiccoat = false;
         this.micleberry = false;
         this.minimize = false;
-        this.mirrorMove = null;
-        this.mudSport = false;
+        this.mirrormove = null;
+        this.mudsport = false;
         this.mustRecharge = false;
         this.overrideMoveset.isolate();
         this.overrideTraits = null;
@@ -600,7 +600,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
         this.rage = false;
         this.rollout.reset();
         this.roost = false;
-        this.slowStart.end();
+        this.slowstart.end();
         this.snatch = false;
         this._stalling = false;
         this._stallTurns = 0;
@@ -611,7 +611,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
         this.twoTurn.reset();
         this.unburden = false;
         this.uproar.end();
-        this.waterSport = false;
+        this.watersport = false;
         this._willTruant = false;
         this.yawn.end();
     }
@@ -662,7 +662,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
     /** Resets single-move statuses like Destiny Bond. */
     public resetSingleMove(): void
     {
-        this.destinyBond = false;
+        this.destinybond = false;
         this.grudge = false;
         this.rage = false;
     }
@@ -689,12 +689,12 @@ export class VolatileStatus implements ReadonlyVolatileStatus
         // this excludes statuses that are explicitly mentioned when updated
         this.embargo.tick();
         this._lockOnTurns.tick();
-        this.magnetRise.tick();
+        this.magnetrise.tick();
         this.charge.tick();
         this._disabled.ts.tick();
         this._encore.ts.tick();
-        this.healBlock.tick();
-        this.slowStart.tick();
+        this.healblock.tick();
+        this.slowstart.tick();
         this.taunt.tick();
         this.twoTurn.tick();
         this.yawn.tick();
@@ -709,7 +709,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
         // reset single-turn statuses
         this.damaged = false;
         this.focus = false;
-        this.magicCoat = false;
+        this.magiccoat = false;
         this.roost = false;
         this.snatch = false;
         this._stalling = false;
@@ -730,22 +730,22 @@ export class VolatileStatus implements ReadonlyVolatileStatus
     public toString(): string
     {
         return `[${([] as string[]).concat(
-            this.aquaRing ? ["aqua ring"] : [],
+            this.aquaring ? ["aqua ring"] : [],
             (Object.keys(this._boosts) as dex.BoostName[])
                 .filter(key => this._boosts[key] !== 0)
                 .map(key => `${key}: ${plus(this._boosts[key])}`),
             this.confusion.isActive ? [this.confusion.toString()] : [],
             this.curse ? ["cursed"] : [],
             this.embargo.isActive ? [this.embargo.toString()] : [],
-            this.focusEnergy ? ["focus energy"] : [],
+            this.focusenergy ? ["focus energy"] : [],
             this.ingrain ? ["ingrain"] : [],
-            this.leechSeed ? ["leech seed"] : [],
+            this.leechseed ? ["leech seed"] : [],
             this._lockOnTurns.isActive ? [this._lockOnTurns.toString()] : [],
             this._lockedOnBy ? ["target of lockon"] : [],
-            this.magnetRise.isActive ? [this.magnetRise.toString()] : [],
+            this.magnetrise.isActive ? [this.magnetrise.toString()] : [],
             this.nightmare ? ["nightmare"] : [],
             this._perish > 0 ? [`perish in ${pluralTurns(this._perish)}`] : [],
-            this.powerTrick ? ["power trick"] : [],
+            this.powertrick ? ["power trick"] : [],
             this.substitute ? ["has substitute"] : [],
             this.suppressAbility ? ["suppressed ability"] : [],
             // TODO: be more specific with trapping info
@@ -757,30 +757,30 @@ export class VolatileStatus implements ReadonlyVolatileStatus
             this.charge.isActive ? [this.charge.toString()] : [],
             this.choiceLock ? ["choice lock " + this.choiceLock] : [],
             this.damaged ? ["damaged this turn"] : [],
-            this.defenseCurl ? ["defense curl"] : [],
-            this.destinyBond ? ["destiny bond"] : [],
+            this.defensecurl ? ["defense curl"] : [],
+            this.destinybond ? ["destiny bond"] : [],
             this._disabled.ts.isActive ?
                 [`${this._disabled.move} ${this._disabled.ts.toString()}`] : [],
             this._encore.ts.isActive ?
                 [`${this._encore.move} ${this._encore.ts.toString()}`] : [],
-            this.flashFire ? ["flash fire"] : [],
+            this.flashfire ? ["flash fire"] : [],
             this.focus ? ["preparing focuspunch"] : [],
             this.grudge ? ["grudge"] : [],
-            this.healBlock.isActive ? [this.healBlock.toString()] : [],
+            this.healblock.isActive ? [this.healblock.toString()] : [],
             this.identified ? [this.identified] : [],
             this.imprison ? ["imprison"] : [],
             this.lockedMove.isActive ? [this.lockedMove.toString()] : [],
-            this.magicCoat ? ["magic coat"] : [],
+            this.magiccoat ? ["magic coat"] : [],
             this.micleberry ? ["micle berry"] : [],
             this.minimize ? ["minimize"] : [],
-            this.mirrorMove ? ["last targeted by " + this.mirrorMove] : [],
-            this.mudSport ? ["mud sport"] : [],
+            this.mirrormove ? ["last targeted by " + this.mirrormove] : [],
+            this.mudsport ? ["mud sport"] : [],
             this.mustRecharge ? ["must recharge"] : [],
             // override traits are handled by Pokemon#toString()
             this.rage ? ["rage"] : [],
             this.rollout.isActive ? [this.rollout.toString()] : [],
             this.roost ? ["roosting"] : [],
-            this.slowStart.isActive ? [this.slowStart.toString()] : [],
+            this.slowstart.isActive ? [this.slowstart.toString()] : [],
             this.snatch ? ["snatching"] : [],
             this._stallTurns ?
                 [pluralTurns("stalled", this._stallTurns - 1)] : [],
@@ -791,7 +791,7 @@ export class VolatileStatus implements ReadonlyVolatileStatus
             this.twoTurn.isActive ?
                 [`preparing ${this.twoTurn.toString()}`] : [],
             this.uproar.isActive ? [this.uproar.toString()] : [],
-            this.waterSport ? ["water sport"] : [],
+            this.watersport ? ["water sport"] : [],
             this._willTruant ? ["truant next turn"] : [],
             this.yawn.isActive ? [this.yawn.toString()] : [])
         .join(", ")}]`;

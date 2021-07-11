@@ -44,17 +44,17 @@ export class BattleState implements ReadonlyBattleState
     }
 
     /** Gets a team. Throws if invalid. */
-    public getTeam(sideId: SideID): Team
+    public getTeam(side: SideID): Team
     {
-        const team = this.tryGetTeam(sideId);
-        if (!team) throw new Error(`Unknown SideID '${sideId}'`);
+        const team = this.tryGetTeam(side);
+        if (!team) throw new Error(`Unknown SideID '${side}'`);
         return team;
     }
 
     /** Gets a team. Returns `undefined` if invalid. */
-    public tryGetTeam(sideId: SideID): Team | undefined
+    public tryGetTeam(side: SideID): Team | undefined
     {
-        return this._teams[sideId];
+        return this._teams[side];
     }
 
     /** Called at the beginning of every turn to update temp statuses. */

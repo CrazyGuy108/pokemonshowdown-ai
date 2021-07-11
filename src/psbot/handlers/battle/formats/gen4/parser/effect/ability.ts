@@ -1,17 +1,19 @@
+/** @file Parsers related to ability activations. */
 import { Protocol } from "@pkmn/protocol";
 import { SideID } from "@pkmn/types";
-import { toIdName } from "../../../../../helpers";
-import { Event } from "../../../../../parser";
-import { BattleAgent } from "../../../agent";
+import { toIdName } from "../../../../../../helpers";
+import { Event } from "../../../../../../parser";
+import { BattleAgent } from "../../../../agent";
 import { BattleParserContext, consume, inference, unordered, verify } from
-    "../../../parser";
-import * as dex from "../dex";
-import { Pokemon } from "../state/Pokemon";
-import { hasAbility } from "./reason/ability";
+    "../../../../parser";
+import * as dex from "../../dex";
+import { AbilityBlockResult } from "../../dex/wrappers/Ability";
+import { Pokemon, ReadonlyPokemon } from "../../state/Pokemon";
+import { hasAbility } from "../reason/ability";
 
 /** UnorderedDeadline type for ability onX() functions. */
-type AbilityParser =
-    unordered.UnorderedDeadline<"gen4", BattleAgent<"gen4">, dex.Ability>;
+type AbilityParser<TResult = dex.Ability> =
+    unordered.UnorderedDeadline<"gen4", BattleAgent<"gen4">, TResult>;
 
 /**
  * Creates an EventInference parser that expects an on-`switchOut` ability to
@@ -49,30 +51,6 @@ async function onSwitchOutUnordered(ctx: BattleParserContext<"gen4">,
     return ability;
 }
 
-// ambiguous? on-start (trace X, X)
-    // trace X
-        // X events
-        // trace event
-    // X
-        // ...
-// solutions:
-    // chunk-level MessageParser
-        // lookahead for trace events
-        // move them to the beginning of an ability activation
-            // how to tentatively parse ability activations?
-    // or: onStart level
-        // Ability.onStart() returns true if it parsed, false otherwise
-            // or could just pass in a custom accept cb
-        // keep trace out of the onStartImpl unordered.oneOf list
-        // if possibly-traced event parses first, lookahead for trace event
-            // basically by calling traceAbility.onStart() at this point
-            // should return ability string that was found
-        // if found:
-            // set trace as base ability
-            // set parsed ability (from returned info) as override ability
-        // else:
-            // 
-
 /**
  * Creates an EventInference parser that expects an on-`start` ability to
  * activate if possible.
@@ -98,7 +76,9 @@ async function onStartImpl(ctx: BattleParserContext<"gen4">,
         {
             // NOTE(gen4): traced ability is shown before trace ability itself
             // parse the possibly-traced ability first before seeing if it was
-            // traced
+            //  traced
+            // this handles ambiguous cases where a traced ability may be one of
+            //  the holder's possible abilities that could activate on-start
             trace = ability;
             continue;
         }
@@ -129,6 +109,83 @@ async function onStartUnordered(ctx: BattleParserContext<"gen4">,
 {
     await ability.onStart(ctx, accept, side);
     return ability;
+}
+
+/**
+ * Creates an EventInference parser that expects an on-`block` ability to
+ * activate if possible.
+ * @param side Pokemon reference who could have such an ability.
+ * @param hitBy Move+user ref that the holder is being hit by.
+ */
+export function onBlock(ctx: BattleParserContext<"gen4">, side: SideID,
+    hitBy: dex.MoveAndUserRef)
+{
+    // if move user ignores the target's abilities, then this function can't be
+    //  called
+    // note: these types of abilities are always(?) made known when they're in
+    //  effect
+    // TODO: add a SubReason for this as a consistency check?
+    const hitByUser = ctx.state.getTeam(hitBy.userRef).active;
+    if (ignoresTargetAbility(hitByUser)) return null;
+
+    const moveTypes = hitBy.move.getPossibleTypes(hitByUser);
+    // only the main status effects can be visibly blocked by an ability
+    const status = hitBy.move.getMainStatusEffects("hit", hitByUser.types);
+
+    const mon = ctx.state.getTeam(side).active;
+    const abilities = getAbilities(mon,
+        // block move's main status effect
+        ability => ability.canBlockStatusEffect(status,
+                ctx.state.status.weather.type) ??
+            // block move based on its type
+            ability.canBlockMoveType(moveTypes, hitBy.move, hitByUser) ??
+            // block move based on damp, etc
+            ability.canBlockEffect(hitBy.move.data.flags?.explosive));
+    return new inference.EventInference(new Set(abilities.values()),
+        onBlockImpl, side, abilities, hitBy);
+}
+
+async function onBlockImpl(ctx: BattleParserContext<"gen4">,
+    accept: inference.AcceptCallback, side: SideID,
+    abilities: Map<dex.Ability, inference.SubInference>,
+    hitBy: dex.MoveAndUserRef): Promise<AbilityBlockResult | undefined>
+{
+    const parsers: AbilityParser<[dex.Ability, AbilityBlockResult]>[] = [];
+    for (const ability of abilities.keys())
+    {
+        parsers.push(unordered.createUnorderedDeadline(onBlockUnordered,
+                /*reject*/ undefined, ability, side, hitBy));
+    }
+
+    const oneOfRes = await unordered.oneOf(ctx, parsers);
+    if (oneOfRes[0])
+    {
+        const [acceptedAbility, blockResult] = oneOfRes[1];
+        accept(abilities.get(acceptedAbility!)!);
+        return blockResult;
+    }
+}
+
+async function onBlockUnordered(ctx: BattleParserContext<"gen4">,
+    accept: unordered.AcceptCallback, ability: dex.Ability, side: SideID,
+    hitBy: dex.MoveAndUserRef): Promise<[dex.Ability, AbilityBlockResult]>
+{
+    return [ability, await ability.onBlock(ctx, accept, side, hitBy)];
+}
+
+/** Checks if a pokemon's ability definitely ignores the target's abilities. */
+function ignoresTargetAbility(mon: ReadonlyPokemon): boolean
+{
+    if (!mon.volatile.suppressAbility)
+    {
+        const userAbility = mon.traits.ability;
+        if ([...userAbility.possibleValues]
+            .every(n => userAbility.map[n].flags?.ignoreTargetAbility))
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
@@ -166,7 +223,7 @@ function getAbilities(mon: Pokemon,
 export async function abilityEvent(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-ability|");
-    const [_, identStr, abilityStr] = event.args;
+    const [, identStr, abilityStr] = event.args;
     const abilityId = toIdName(abilityStr);
     handleAbility(ctx, identStr, abilityId)
     await consume(ctx);
@@ -187,7 +244,7 @@ export function abilitySuffix(ctx: BattleParserContext<"gen4">,
     {
         case "cant":
         {
-            const [_, identStr, reason] = event.args;
+            const [, identStr, reason] = event.args;
             const abilityId = parseAbilityEffectId(reason);
             if (!abilityId) break;
             const {holder, ident, ability} =

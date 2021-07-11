@@ -2,16 +2,20 @@ import { Protocol } from "@pkmn/protocol";
 import { BoostID, SideID } from "@pkmn/types";
 import { toIdName } from "../../../../../helpers";
 import { Event } from "../../../../../parser";
+import { BattleAgent } from "../../../agent";
 import { baseEventLoop, BattleParserContext, consume, dispatcher,
     EventHandlerMap, tryPeek, verify } from "../../../parser";
 import * as dex from "../dex";
-import { abilityEvent } from "./ability";
 import { useMove } from "./action/move";
 import { switchIn } from "./action/switch";
+import { abilityEvent } from "./effect/ability";
 
 /** Private mapped type for {@link handlersImpl}. */
 type HandlersImpl<T> =
-    {-readonly [U in keyof T]?: T[U] | "default" | "unsupported"};
+    {-readonly [U in keyof T]: T[U] | "default" | "unsupported"};
+
+/** Private mapped type for {@link handlersImpl} and {@link handlers}. */
+type HandlerMap = EventHandlerMap<"gen4", BattleAgent<"gen4">, [], void>;
 
 /**
  * BattleParser handlers for each event type. Larger handler functions or
@@ -22,28 +26,28 @@ type HandlersImpl<T> =
  * special behavior implemented by its handler. Similarly, setting it to
  * `"unsupported"` will be replaced by a parser that always throws.
  */
-const handlersImpl: HandlersImpl<EventHandlerMap<"gen4">> = {};
+const handlersImpl: HandlersImpl<HandlerMap> = {};
 handlersImpl["|turn|"] = "default";
 // TODO: game-over handler?
 handlersImpl["|win|"] = "default";
 handlersImpl["|tie|"] = "default";
 handlersImpl["|move|"] = async function(ctx: BattleParserContext<"gen4">)
 {
-    return await useMove(ctx);
+    await useMove(ctx);
 };
 handlersImpl["|switch|"] = async function(ctx: BattleParserContext<"gen4">)
 {
-    return await switchIn(ctx);
+    await switchIn(ctx);
 };
 handlersImpl["|drag|"] = async function(ctx: BattleParserContext<"gen4">)
 {
-    return await switchIn(ctx);
+    await switchIn(ctx);
 };
 handlersImpl["|detailschange|"] = async function(
     ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|detailschange|");
-    const [_, identStr, detailsStr] = event.args;
+    const [, identStr, detailsStr] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
     const details = Protocol.parseDetails(ident.name, identStr, detailsStr);
 
@@ -56,7 +60,7 @@ handlersImpl["|detailschange|"] = async function(
 handlersImpl["|cant|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|cant|");
-    const [_, identStr, reason, moveStr] = event.args;
+    const [, identStr, reason, moveStr] = event.args;
 
     // should already be handled by previous |move| event
     if (reason === "Focus Punch") return;
@@ -92,7 +96,7 @@ handlersImpl["|cant|"] = async function(ctx: BattleParserContext<"gen4">)
 handlersImpl["|faint|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|faint|");
-    const [_, identStr] = event.args;
+    const [, identStr] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
     ctx.state.getTeam(ident.player).active.faint();
     await consume(ctx);
@@ -101,7 +105,7 @@ handlersImpl["|-formechange|"] = async function(
     ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-formechange|");
-    const [_, identStr, speciesForme] = event.args;
+    const [, identStr, speciesForme] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
 
     const mon = ctx.state.getTeam(ident.player).active;
@@ -117,17 +121,17 @@ handlersImpl["|-block|"] = async function(ctx: BattleParserContext<"gen4">)
 };
 handlersImpl["|-damage|"] = async function(ctx: BattleParserContext<"gen4">)
 {
-    return await handleDamage(ctx);
+    await handleDamage(ctx);
 };
 handlersImpl["|-heal|"] = async function(ctx: BattleParserContext<"gen4">)
 {
-    return await handleDamage(ctx, /*heal*/ true);
+    await handleDamage(ctx, /*heal*/ true);
 };
 async function handleDamage(ctx: BattleParserContext<"gen4">,
     heal?: boolean)
 {
     const event = await verify(ctx, heal ? "|-heal|" : "|-damage|");
-    const [_, identStr, healthStr] = event.args;
+    const [, identStr, healthStr] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
     const health = Protocol.parseHealth(healthStr);
     ctx.state.getTeam(ident.player).active.hp
@@ -137,7 +141,7 @@ async function handleDamage(ctx: BattleParserContext<"gen4">,
 handlersImpl["|-sethp|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-sethp|");
-    const [_, identStr1, healthStr1, identStr2, healthNumStr2] = event.args;
+    const [, identStr1, healthStr1, identStr2, healthNumStr2] = event.args;
 
     const ident1 = Protocol.parsePokemonIdent(identStr1);
     const mon1 = ctx.state.getTeam(ident1.player).active;
@@ -174,7 +178,7 @@ handlersImpl["|-sethp|"] = async function(ctx: BattleParserContext<"gen4">)
 handlersImpl["|-status|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-status|");
-    const [_, identStr, statusName] = event.args;
+    const [, identStr, statusName] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
     ctx.state.getTeam(ident.player).active.majorStatus.afflict(statusName);
     await consume(ctx);
@@ -182,7 +186,7 @@ handlersImpl["|-status|"] = async function(ctx: BattleParserContext<"gen4">)
 handlersImpl["|-curestatus|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-curestatus|");
-    const [_, identStr, statusName] = event.args;
+    const [, identStr, statusName] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
     ctx.state.getTeam(ident.player).active.majorStatus
         .assert(statusName).cure();
@@ -191,23 +195,23 @@ handlersImpl["|-curestatus|"] = async function(ctx: BattleParserContext<"gen4">)
 handlersImpl["|-cureteam|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-cureteam|");
-    const [_, identStr] = event.args;
+    const [, identStr] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
     ctx.state.getTeam(ident.player).cure();
     await consume(ctx);
 };
 handlersImpl["|-boost|"] = async function(ctx: BattleParserContext<"gen4">)
 {
-    return await handleBoost(ctx);
+    await handleBoost(ctx);
 };
 handlersImpl["|-unboost|"] = async function(ctx: BattleParserContext<"gen4">)
 {
-    return await handleBoost(ctx, /*flip*/ true);
+    await handleBoost(ctx, /*flip*/ true);
 };
 async function handleBoost(ctx: BattleParserContext<"gen4">, flip?: boolean)
 {
     const event = await verify(ctx, flip ? "|-boost|" : "|-unboost|");
-    const [_, identStr, stat, numStr] = event.args;
+    const [, identStr, stat, numStr] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
     const num = Number(numStr);
     if (isNaN(num))
@@ -221,7 +225,7 @@ async function handleBoost(ctx: BattleParserContext<"gen4">, flip?: boolean)
 handlersImpl["|-setboost|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-setboost|");
-    const [_, identStr, stat, numStr] = event.args;
+    const [, identStr, stat, numStr] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
     const num = Number(numStr);
     if (isNaN(num))
@@ -234,7 +238,7 @@ handlersImpl["|-setboost|"] = async function(ctx: BattleParserContext<"gen4">)
 handlersImpl["|-swapboost|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-swapboost|");
-    const [_, identStr1, identStr2, statsStr] = event.args;
+    const [, identStr1, identStr2, statsStr] = event.args;
     const ident1 = Protocol.parsePokemonIdent(identStr1);
     const ident2 = Protocol.parsePokemonIdent(identStr2);
     const stats = (statsStr?.split(", ") ?? dex.boostKeys) as BoostID[];
@@ -253,7 +257,7 @@ handlersImpl["|-invertboost|"] = async function(
     ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-invertboost|");
-    const [_, identStr] = event.args;
+    const [, identStr] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
 
     const boosts = ctx.state.getTeam(ident.player).active.volatile.boosts;
@@ -264,7 +268,7 @@ handlersImpl["|-invertboost|"] = async function(
 handlersImpl["|-clearboost|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-clearboost|");
-    const [_, identStr] = event.args;
+    const [, identStr] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
 
     const boosts = ctx.state.getTeam(ident.player).active.volatile.boosts;
@@ -292,7 +296,7 @@ handlersImpl["|-clearpositiveboost|"] = async function(
     ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-clearpositiveboost|");
-    const [_, identStr] = event.args;
+    const [, identStr] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
 
     const boosts = ctx.state.getTeam(ident.player).active.volatile.boosts;
@@ -307,7 +311,7 @@ handlersImpl["|-clearnegativeboost|"] = async function(
     ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-clearpositiveboost|");
-    const [_, identStr] = event.args;
+    const [, identStr] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
 
     const boosts = ctx.state.getTeam(ident.player).active.volatile.boosts;
@@ -321,7 +325,7 @@ handlersImpl["|-clearnegativeboost|"] = async function(
 handlersImpl["|-copyboost|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-copyboost|");
-    const [_, identStr1, identStr2, statsStr] = event.args;
+    const [, identStr1, identStr2, statsStr] = event.args;
     const ident1 = Protocol.parsePokemonIdent(identStr1);
     const ident2 = Protocol.parsePokemonIdent(identStr2);
     const stats = (statsStr?.split(", ") ?? dex.boostKeys) as BoostID[];
@@ -335,7 +339,7 @@ handlersImpl["|-copyboost|"] = async function(ctx: BattleParserContext<"gen4">)
 handlersImpl["|-weather|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-weather|");
-    const [_, weatherStr] = event.args;
+    const [, weatherStr] = event.args;
     if (event.kwArgs.upkeep)
     {
         if (ctx.state.status.weather.type !== weatherStr)
@@ -364,18 +368,18 @@ handlersImpl["|-weather|"] = async function(ctx: BattleParserContext<"gen4">)
 };
 handlersImpl["|-fieldstart|"] = async function(ctx: BattleParserContext<"gen4">)
 {
-    return await updateFieldEffect(ctx, /*start*/ true);
+    await updateFieldEffect(ctx, /*start*/ true);
 };
 handlersImpl["|-fieldend|"] = async function(ctx: BattleParserContext<"gen4">)
 {
-    return await updateFieldEffect(ctx, /*start*/ false);
+    await updateFieldEffect(ctx, /*start*/ false);
 };
 async function updateFieldEffect(ctx: BattleParserContext<"gen4">,
     start: boolean)
 {
     const event = await verify(ctx,
         start ? "|-fieldstart|" : "|-fieldend|");
-    const [_, effectStr] = event.args;
+    const [, effectStr] = event.args;
     const effect = Protocol.parseEffect(effectStr, toIdName);
     switch (effect.name)
     {
@@ -390,17 +394,17 @@ async function updateFieldEffect(ctx: BattleParserContext<"gen4">,
 }
 handlersImpl["|-sidestart|"] = async function(ctx: BattleParserContext<"gen4">)
 {
-    return await handleSideCondition(ctx, /*start*/ true);
+    await handleSideCondition(ctx, /*start*/ true);
 };
 handlersImpl["|-sideend|"] = async function(ctx: BattleParserContext<"gen4">)
 {
-    return await handleSideCondition(ctx, /*start*/ false);
+    await handleSideCondition(ctx, /*start*/ false);
 };
 async function handleSideCondition(ctx: BattleParserContext<"gen4">,
     start: boolean)
 {
     const event = await verify(ctx, start ? "|-sidestart|" : "|-sideend|");
-    const [_, sideStr, effectStr] = event.args;
+    const [, sideStr, effectStr] = event.args;
     // parsePokemonIdent supports side identifiers
     const side = Protocol.parsePokemonIdent(
         sideStr as any as Protocol.PokemonIdent).player;
@@ -440,13 +444,13 @@ async function handleSideCondition(ctx: BattleParserContext<"gen4">,
 handlersImpl["|-start|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-start|");
-    const [_, identStr, effectStr, other] = event.args;
+    const [, identStr, effectStr, other] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
     const effect = Protocol.parseEffect(effectStr, toIdName);
     const mon = ctx.state.getTeam(ident.player).active;
     switch (effect.name)
     {
-        case "flashfire": mon.volatile.flashFire = true; break;
+        case "flashfire": mon.volatile.flashfire = true; break;
         case "typeadd":
             mon.volatile.addedType = other?.toLowerCase() as dex.Type ?? "???";
             break;
@@ -489,7 +493,7 @@ handlersImpl["|-start|"] = async function(ctx: BattleParserContext<"gen4">)
 handlersImpl["|-end|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-end|");
-    const [_, identStr, effectStr] = event.args;
+    const [, identStr, effectStr] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
     const effect = Protocol.parseEffect(effectStr, toIdName);
     const v = ctx.state.getTeam(ident.player).active.volatile;
@@ -510,7 +514,7 @@ function handleStartEndTrivial(ctx: BattleParserContext<"gen4">,
     const start = event.args[0] === "-start";
     switch (effectId)
     {
-        case "aquaring": v.aquaRing = start; break;
+        case "aquaring": v.aquaring = start; break;
         case "attract": v.attract = start; break;
         case "bide": v.bide[start ? "start" : "end"](); break;
         case "confusion":
@@ -541,18 +545,18 @@ function handleStartEndTrivial(ctx: BattleParserContext<"gen4">,
             }
             else v.removeEncore();
             break;
-        case "focusenergy": v.focusEnergy = start; break;
+        case "focusenergy": v.focusenergy = start; break;
         case "foresight": v.identified = start ? "foresight" : null; break;
-        case "healblock": v.healBlock[start ? "start" : "end"](); break;
+        case "healblock": v.healblock[start ? "start" : "end"](); break;
         case "imprison": v.imprison = start; break;
         case "ingrain": v.ingrain = start; break;
-        case "leechseed": v.leechSeed = start; break;
-        case "magnetrise": v.magnetRise[start ? "start" : "end"](); break;
+        case "leechseed": v.leechseed = start; break;
+        case "magnetrise": v.magnetrise[start ? "start" : "end"](); break;
         case "miracleeye": v.identified = start ? "miracleEye" : null; break;
-        case "mudsport": v.mudSport = start; break;
+        case "mudsport": v.mudsport = start; break;
         case "nightmare": v.nightmare = start; break;
-        case "powertrick": v.powerTrick = start; break;
-        case "slowstart": v.slowStart[start ? "start" : "end"](); break;
+        case "powertrick": v.powertrick = start; break;
+        case "slowstart": v.slowstart[start ? "start" : "end"](); break;
         case "substitute": v.substitute = start; break;
         case "taunt": v.taunt[start ? "start" : "end"](); break;
         case "torment": v.torment = start; break;
@@ -563,7 +567,7 @@ function handleStartEndTrivial(ctx: BattleParserContext<"gen4">,
             }
             else v.uproar[start ? "start" : "end"]();
             break;
-        case "watersport": v.waterSport = start; break;
+        case "watersport": v.watersport = start; break;
         case "yawn": v.yawn[start ? "start" : "end"](); break;
         default:
             if (dex.isFutureMove(effectId))
@@ -590,7 +594,7 @@ handlersImpl["|-item|"] = async function(ctx: BattleParserContext<"gen4">)
 handlersImpl["|-enditem|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-enditem|");
-    const [_, identStr, itemName] = event.args;
+    const [, identStr, itemName] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
     const itemId = toIdName(itemName);
 
@@ -623,7 +627,7 @@ handlersImpl["|-ability|"] = async function(ctx: BattleParserContext<"gen4">)
 handlersImpl["|-endability|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-endability|");
-    const [_, identStr, abilityName] = event.args;
+    const [, identStr, abilityName] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
     const mon = ctx.state.getTeam(ident.player).active;
     // reveal ability if specified
@@ -635,7 +639,7 @@ handlersImpl["|-endability|"] = async function(ctx: BattleParserContext<"gen4">)
 handlersImpl["|-transform|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-transform|");
-    const [_, identSourceStr, identTargetStr] = event.args;
+    const [, identSourceStr, identTargetStr] = event.args;
     const identSource = Protocol.parsePokemonIdent(identSourceStr);
     const identTarget = Protocol.parsePokemonIdent(identTargetStr);
     ctx.state.getTeam(identSource.player).active.transform(
@@ -650,7 +654,7 @@ handlersImpl["|-zbroken|"] = "unsupported";
 handlersImpl["|-activate|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-activate|");
-    const [_, identStr, effectStr, other1, other2] = event.args;
+    const [, identStr, effectStr, other1, other2] = event.args;
     if (!identStr)
     {
         await consume(ctx);
@@ -751,7 +755,7 @@ handlersImpl["|-waiting|"] = "unsupported";
 handlersImpl["|-prepare|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-prepare|");
-    const [_, identStr, moveName] = event.args;
+    const [, identStr, moveName] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
     const moveId = toIdName(moveName);
     if (!dex.isTwoTurnMove(moveId))
@@ -765,7 +769,7 @@ handlersImpl["|-mustrecharge|"] = async function(
     ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-mustrecharge|");
-    const [_, identStr] = event.args;
+    const [, identStr] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
     // TODO: this should already be implied by |move| effects
     ctx.state.getTeam(ident.player).active.volatile.mustRecharge = true;
@@ -774,12 +778,12 @@ handlersImpl["|-mustrecharge|"] = async function(
 handlersImpl["|-singlemove|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-singlemove|");
-    const [_, identStr, moveName] = event.args;
+    const [, identStr, moveName] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
     const v = ctx.state.getTeam(ident.player).active.volatile;
     switch (moveName)
     {
-        case "Destiny Bond": v.destinyBond = true; break;
+        case "Destiny Bond": v.destinybond = true; break;
         case "Grudge": v.grudge = true; break;
         case "Rage": v.rage = true; break;
     }
@@ -788,7 +792,7 @@ handlersImpl["|-singlemove|"] = async function(ctx: BattleParserContext<"gen4">)
 handlersImpl["|-singleturn|"] = async function(ctx: BattleParserContext<"gen4">)
 {
     const event = await verify(ctx, "|-singleturn|");
-    const [_, identStr, effectStr] = event.args;
+    const [, identStr, effectStr] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
     const effect = Protocol.parseEffect(effectStr, toIdName);
     const v = ctx.state.getTeam(ident.player).active.volatile;
@@ -796,7 +800,7 @@ handlersImpl["|-singleturn|"] = async function(ctx: BattleParserContext<"gen4">)
     {
         case "endure": case "protect": v.stall(/*flag*/ true); break;
         case "focuspunch": v.focus = true; break;
-        case "magiccoat": v.magicCoat = true; break;
+        case "magiccoat": v.magiccoat = true; break;
         case "roost": v.roost = true; break;
         case "snatch": v.roost = true; break;
     }
@@ -831,7 +835,7 @@ async function ignoredEvent(ctx: BattleParserContext<"gen4">)
 export const ignoredEvents = baseEventLoop(ignoredEvent);
 
 /** Handlers for all {@link Protocol.ArgName event types}. */
-export const handlers: Required<EventHandlerMap<"gen4">> =
+export const handlers: Required<HandlerMap> =
     // this Object.assign expression is so that the function names appear as if
     //  they were defined directly as properties of this object so that stack
     //  traces make more sense

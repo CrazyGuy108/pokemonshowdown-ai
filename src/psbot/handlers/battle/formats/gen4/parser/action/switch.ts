@@ -191,7 +191,7 @@ async function switchEvent(ctx: BattleParserContext<"gen4">,
         event = ev;
     }
     else event = await verify(ctx, "|switch|", "|drag|");
-    const [_, identStr, detailsStr, healthStr] = event.args;
+    const [, identStr, detailsStr, healthStr] = event.args;
 
     const ident = Protocol.parsePokemonIdent(identStr);
     if (side && ident.player !== side)

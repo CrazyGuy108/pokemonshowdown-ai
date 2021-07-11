@@ -38,6 +38,13 @@ class HasItem extends inference.SubReason
     }
 
     /** @override */
+    public canHold(): boolean | null
+    {
+        return subsetOrIndependent(this.items, this.item.possibleValues,
+            this.negative);
+    }
+
+    /** @override */
     public assert(): void
     {
         if (this.negative) this.rejectImpl();

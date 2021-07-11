@@ -140,7 +140,7 @@ async function interceptSwitchEvent(ctx: BattleParserContext<"gen4">,
 {
     const event = await tryVerify(ctx, "|-activate|");
     if (!event) return;
-    const [_, identStr, effectStr] = event.args;
+    const [, identStr, effectStr] = event.args;
     if (!identStr) return;
     const ident = Protocol.parsePokemonIdent(identStr);
     if (ident.player !== intercept) return;
@@ -168,7 +168,7 @@ export async function useMove(ctx: BattleParserContext<"gen4">, side?: SideID,
     Promise<void>
 {
     const event = await verify(ctx, "|move|");
-    const [_, identStr, moveName] = event.args;
+    const [, identStr, moveName] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
     const moveId = toIdName(moveName);
 
