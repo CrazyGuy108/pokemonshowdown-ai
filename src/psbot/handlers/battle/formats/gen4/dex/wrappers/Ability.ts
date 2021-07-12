@@ -13,7 +13,7 @@ import { isStatusSilent, verifyStatus } from "../../parser/effect/status";
 import { chance, hasAnItem, moveIsType } from "../../parser/reason";
 import { Pokemon, ReadonlyPokemon } from "../../state/Pokemon";
 import { getMove } from "../dex";
-import { AbilityData, BoostTable, StatusType } from "../dex-util";
+import { AbilityData, AbilityOn, BoostTable, StatusType } from "../dex-util";
 import { Move, MoveAndUserRef } from "./Move";
 
 /** Result from `Ability#onBlock(). */
@@ -30,6 +30,7 @@ export interface AbilityBlockResult
     failed?: true;
 }
 
+// TODO: data wrappers may need SRP refactoring and/or complete removal
 /** Encapsulates ability properties. */
 export class Ability
 {
@@ -185,57 +186,6 @@ export class Ability
     }
 
     // onStart() helpers
-
-    /**
-     * Handles events due to a statusImmunity ability curing a status (e.g.
-     * Insomnia).
-     * @param accept Callback to accept this pathway.
-     * @param side Ability holder reference.
-     */
-    private async cureImmunity(ctx: BattleParserContext<"gen4">,
-        accept: unordered.AcceptCallback, side: SideID): Promise<void>
-    {
-        const immunities = this.data.statusImmunity;
-        if (!immunities) return;
-        await eventLoop(ctx, async _ctx =>
-        {
-            const event = await tryPeek(_ctx);
-            if (!event) return;
-            switch (event.args[0])
-            {
-                case "-end":
-                {
-                    const [, identStr, effectStr] = event.args;
-                    const ident = Protocol.parsePokemonIdent(identStr);
-                    if (ident.player !== side) break;
-                    const effect = Protocol.parseEffect(effectStr, toIdName);
-                    if (immunities[effect.name as StatusType] !== true) break;
-                    if (!this.isEventFromAbility(event as Event<"|-end|">))
-                    {
-                        break;
-                    }
-                    accept();
-                    await base["|-end|"](_ctx);
-                    break;
-                }
-                case "-curestatus":
-                {
-                    const [, identStr, majorStatusType] = event.args;
-                    const ident = Protocol.parsePokemonIdent(identStr);
-                    if (ident.player !== side) break;
-                    if (immunities[majorStatusType] !== true) break;
-                    if (!this.isEventFromAbility(
-                            event as Event<"|-curestatus|">))
-                    {
-                        break;
-                    }
-                    accept();
-                    await base["|-curestatus|"](_ctx);
-                    break;
-                }
-            }
-        });
-    }
 
     /**
      * Handles events due to a revealItem ability (e.g. Frisk).
@@ -758,26 +708,39 @@ export class Ability
 
     //#endregion
 
-    //#region on-status parser
+    //#region on-status
+
+    /**
+     * Checks whether the ability can activate on-`status` to cure it.
+     * @param mon Potential ability holder.
+     * @param statusType Afflicted status.
+     * @returns A Set of SubReasons describing additional conditions of
+     * activation, or the empty set if there are none, or null if it cannot
+     * activate.
+     */
+    public canStatus(mon: ReadonlyPokemon, statusType: StatusType):
+        Set<inference.SubReason> | null
+    {
+        return this.canCureImmunity("status", mon, [statusType]) ?
+            new Set() : null;
+    }
 
     /**
      * Activates an ability on-`status`.
+     * @param accept Callback to accept this pathway.
      * @param side Ability holder reference.
      */
-    public async onStatus(ctx: BattleParserContext<"gen4">, side: SideID):
-        Promise<AbilityResult>
+    public async onStatus(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID): Promise<void>
     {
         if (this.data.on?.status)
         {
             // cure status immunity
             if (this.data.on.status.cure)
             {
-                await this.verifyInitialEvent(ctx, side);
-                return await this.cure(ctx, "status", side);
+                return await this.cureImmunity(ctx, accept, side);
             }
         }
-        throw new Error("On-status effect shouldn't activate for ability " +
-            `'${this.data.name}'`);
     }
 
     //#endregion
@@ -1027,30 +990,106 @@ export class Ability
             effect.name === this.data.name;
     }
 
+    /**
+     * Checks if the ability can cure a status based on immunity.
+     * @param on Circumstance in which the ability would activate.
+     * @param mon Potential ability holder.
+     * @param statusTypes Statuses to consider. Omit to assume all relevant
+     * status immunities.
+     * @returns True if the ability can activate under the given circumstances,
+     * false if no immunities are violated, or null if the ability doesn't
+     * apply here (i.e., it's not immune to any status under the given
+     * circumstances).
+     */
+    private canCureImmunity(on: AbilityOn, mon: ReadonlyPokemon,
+        statusTypes?: readonly StatusType[]): boolean | null
+    {
+        if (!this.data.statusImmunity) return null;
+        switch (on)
+        {
+            case "start": case "status":
+                if (!this.data.on?.[on]?.cure) return null;
+                break;
+            default:
+                return null;
+        }
+        if (!statusTypes)
+        {
+            statusTypes = Object.keys(this.data.statusImmunity) as StatusType[];
+        }
+        return statusTypes.some(s => this.data.statusImmunity![s] &&
+            hasStatus(mon, s));
+    }
+
+    /**
+     * Handles events due to a statusImmunity ability curing a status (e.g.
+     * Insomnia).
+     * @param accept Callback to accept this pathway.
+     * @param side Ability holder reference.
+     */
+    private async cureImmunity(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID): Promise<void>
+    {
+        const immunities = this.data.statusImmunity;
+        if (!immunities) return;
+
+        // verify initial event
+        const initial = await tryVerify(ctx, "|-activate|");
+        if (!initial) return;
+        const [, initialIdentStr, initialEffectStr] = initial.args;
+        if (!initialIdentStr) return;
+        const initialIdent = Protocol.parsePokemonIdent(initialIdentStr);
+        if (initialIdent.player !== side) return;
+        const initialEffect = Protocol.parseEffect(initialEffectStr);
+        if (initialEffect.type !== "ability") return;
+        if (initialEffect.name !== this.data.name) return;
+        accept();
+        await base["|-activate|"](ctx);
+
+        // parse cure events
+        await eventLoop(ctx, async function cureImmunityLoop(_ctx)
+        {
+            const event = await tryPeek(_ctx);
+            if (!event) return;
+            switch (event.args[0])
+            {
+                case "-end":
+                {
+                    const [, identStr, effectStr] = event.args;
+                    const ident = Protocol.parsePokemonIdent(identStr);
+                    if (ident.player !== side) break;
+                    const effect = Protocol.parseEffect(effectStr, toIdName);
+                    if (immunities[effect.name as StatusType] !== true) break;
+                    await base["|-end|"](_ctx);
+                    break;
+                }
+                case "-curestatus":
+                {
+                    const [, identStr, majorStatusType] = event.args;
+                    const ident = Protocol.parsePokemonIdent(identStr);
+                    if (ident.player !== side) break;
+                    if (immunities[majorStatusType] !== true) break;
+                    await base["|-curestatus|"](_ctx);
+                    break;
+                }
+            }
+        });
+    }
+
+    // TODO: generalize for multiple immunities, e.g. wonderguard
+    /** Gets the ability's move type immunity, or null if none found. */
+    public getTypeImmunity(): Type | null
+    {
+        const type = this.data.on?.block?.move?.type;
+        if (!type || type === "nonSuper") return null;
+        return type;
+    }
+
     //#endregion
 
     //#endregion
 
     //#region canX() SubReason builders for onX() activateAbility parsers
-
-    //#region on-status reason
-
-    /**
-     * Checks whether the ability can activate on-`status` to cure it.
-     * @param mon Potential ability holder.
-     * @param statusType Afflicted status.
-     * @returns A Set of SubReasons describing additional conditions of
-     * activation, or the empty set if there are none, or null if it cannot
-     * activate.
-     */
-    public canStatus(mon: ReadonlyPokemon, statusType: dexutil.StatusType):
-        Set<SubReason> | null
-    {
-        return this.canCureImmunity("status", mon, [statusType]) ?
-            new Set() : null;
-    }
-
-    //#endregion
 
     //#region on-moveContactKO/moveContact/moveDamage reasons
 
@@ -1105,51 +1144,6 @@ export class Ability
     public canMoveDrain(): Set<SubReason> | null
     {
         return this.data.on?.moveDrain ? new Set() : null;
-    }
-
-    //#endregion
-
-    //#region canX() method helpers
-
-    /**
-     * Checks if the ability can cure a status based on immunity.
-     * @param on Circumstance in which the ability would activate.
-     * @param mon Potential ability holder.
-     * @param statusTypes Statuses to consider. Omit to assume all relevant
-     * status immunities.
-     * @returns True if the ability can activate under the given circumstances,
-     * false if no immunities are violated, or null if the ability doesn't
-     * apply here (i.e., it's not immune to any status under the given
-     * circumstances).
-     */
-    private canCureImmunity(on: dexutil.AbilityOn, mon: ReadonlyPokemon,
-        statusTypes?: readonly dexutil.StatusType[]): boolean | null
-    {
-        if (!this.data.statusImmunity) return null;
-        switch (on)
-        {
-            case "start": case "status":
-                if (!this.data.on?.[on]?.cure) return null;
-                break;
-            default:
-                return null;
-        }
-        if (!statusTypes)
-        {
-            statusTypes = Object.keys(this.data.statusImmunity) as
-                dexutil.StatusType[];
-        }
-        return statusTypes.some(s => this.data.statusImmunity![s] &&
-            hasStatus(mon, s));
-    }
-
-    // TODO: generalize for multiple immunities, e.g. wonderguard
-    /** Gets the ability's move type immunity, or null if none found. */
-    public getTypeImmunity(): dexutil.Type | null
-    {
-        const type = this.data.on?.block?.move?.type;
-        if (!type || type === "nonSuper") return null;
-        return type;
     }
 
     //#endregion

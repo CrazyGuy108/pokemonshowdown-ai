@@ -247,6 +247,45 @@ function ignoresTargetAbility(mon: ReadonlyPokemon): boolean
 }
 
 /**
+ * Creates an EventInference parser that expects an on-`status` ability to
+ * activate if possible.
+ * @param side Pokemon reference who could have such an ability.
+ */
+export function onStatus(ctx: BattleParserContext<"gen4">, side: SideID,
+    statusType: dex.StatusType)
+{
+    const mon = ctx.state.getTeam(side).active;
+    const abilities = getAbilities(mon,
+        ability => ability.canStatus(mon, statusType));
+    return new inference.EventInference(new Set(abilities.values()),
+        onStatusImpl, side, abilities);
+}
+
+async function onStatusImpl(ctx: BattleParserContext<"gen4">,
+    accept: inference.AcceptCallback, side: SideID,
+    abilities: Map<dex.Ability, inference.SubInference>):
+    Promise<void>
+{
+    const parsers: AbilityParser[] = [];
+    for (const ability of abilities.keys())
+    {
+        parsers.push(unordered.createUnorderedDeadline(onStatusUnordered,
+                /*reject*/ undefined, ability, side));
+    }
+
+    const [ok, acceptedAbility] = await unordered.oneOf(ctx, parsers);
+    if (ok) accept(abilities.get(acceptedAbility!)!);
+}
+
+async function onStatusUnordered(ctx: BattleParserContext<"gen4">,
+    accept: unordered.AcceptCallback, ability: dex.Ability, side: SideID):
+    Promise<dex.Ability>
+{
+    await ability.onStatus(ctx, accept, side);
+    return ability;
+}
+
+/**
  * Searches for possible ability pathways based on the given predicate.
  * @param mon Pokemon to search.
  * @param prove Callback for filtering eligible abilities. Should return a set
