@@ -1,5 +1,5 @@
 import { Protocol } from "@pkmn/protocol";
-import { SideID } from "@pkmn/types";
+import { BoostID, SideID } from "@pkmn/types";
 import { Type, WeatherType } from "..";
 import { toIdName } from "../../../../../../helpers";
 import { Event } from "../../../../../../parser";
@@ -685,11 +685,35 @@ export class Ability
 
     //#endregion
 
-    //#region on-tryUnboost parser
+    //#region on-tryUnboost
 
-    /** Activates an ability on-`tryUnboost`. */
-    public async onTryUnboost(ctx: BattleParserContext<"gen4">, side: SideID):
-        Promise<AbilityResult>
+    /**
+     * Checks whether the ability can activate on-`tryUnboost` to block an
+     * unboost effect.
+     * @param boosts Boosts that could be blocked.
+     * @returns A Set of SubReasons describing additional conditions of
+     * activation, or the empty set if there are none, or null if it cannot
+     * activate.
+     */
+    public canBlockUnboost(boosts: Partial<BoostTable<number>>):
+        Set<inference.SubReason> | null
+    {
+        if (!this.data.on?.tryUnboost?.block) return null;
+        const blockUnboost = this.data.on.tryUnboost.block;
+        return (Object.keys(boosts) as BoostID[]).some(
+                b => boosts[b]! < 0 && blockUnboost[b]) ?
+            new Set() : null;
+    }
+
+    /**
+     * Activates an ability on-`tryUnboost`.
+     * @param accept Callback to accept this pathway.
+     * @param side Ability holder reference.
+     * @returns The boosts that were blocked.
+     */
+    public async onTryUnboost(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID):
+        Promise<Partial<BoostTable<true>>>
     {
         // TODO: assert non-ignoreTargetAbility (moldbreaker) after handling if
         //  this is due to a move effect
@@ -697,29 +721,39 @@ export class Ability
         {
             if (this.data.on.tryUnboost.block)
             {
-                return await this.blockUnboost(ctx, side);
+                return await this.blockUnboost(ctx, accept, side);
             }
         }
-        throw new Error("On-tryUnboost effect shouldn't activate for ability " +
-            `'${this.data.name}'`);
+        return {};
     }
 
-    /** Handles events due to an unboost-blocking ability (e.g. Clear Body). */
-    private async blockUnboost(ctx: BattleParserContext<"gen4">, side: SideID):
-        Promise<AbilityResult>
+    /**
+     * Handles events due to an unboost-blocking ability (e.g. Clear Body).
+     * @param accept Callback to accept this pathway.
+     * @param side Ability holder reference.
+     * @returns The boosts that were blocked.
+     */
+    private async blockUnboost(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID):
+        Promise<Partial<BoostTable<true>>>
     {
         const boosts = this.data.on?.tryUnboost?.block;
-        // istanbul ignore next: should never happen
-        if (!boosts) throw new Error("On-tryUnboost block effect failed");
+        // istanbul ignore next: no-op, should never happen
+        if (!boosts) return {};
 
-        // should get a fail event
-        await this.verifyInitialEvent(ctx, side);
-        const next = await tryPeek(ctx);
-        if (next?.type !== "fail")
-        {
-            throw new Error("On-tryUnboost block effect failed");
-        }
-        return {...await base.fail(ctx), blockUnboost: boosts};
+        const event = await tryVerify(ctx, "|-fail|");
+        if (!event) return {};
+        const [, identStr, blocked] = event.args;
+        const ident = Protocol.parsePokemonIdent(identStr);
+        if (ident.player !== side) return {};
+        if (blocked !== "unboost") return {};
+        if (!this.isEventFromAbility(event)) return {};
+        if (!event.kwArgs.of) return {};
+        const identOf = Protocol.parsePokemonIdent(event.kwArgs.of);
+        if (identOf.player !== side) return {};
+        accept();
+        await base["|-fail|"](ctx);
+        return boosts;
     }
 
     //#endregion
@@ -998,29 +1032,6 @@ export class Ability
     //#endregion
 
     //#region canX() SubReason builders for onX() activateAbility parsers
-
-    //#region on-tryUnboost reason
-
-    /**
-     * Checks whether the ability can activate on-`tryUnboost` to block an
-     * unboost effect.
-     * @param boosts Boosts to block. Only one has to be blockable for this
-     * method to not return null.
-     * @returns A Set of SubReasons describing additional conditions of
-     * activation, or the empty set if there are none, or null if it cannot
-     * activate.
-     */
-    public canBlockUnboost(boosts: Partial<dexutil.BoostTable>):
-        Set<SubReason> | null
-    {
-        if (!this.data.on?.tryUnboost?.block) return null;
-        const blockUnboost = this.data.on.tryUnboost.block;
-        return (Object.keys(boosts) as dexutil.BoostName[]).some(
-                b => boosts[b]! < 0 && blockUnboost[b]) ?
-            new Set() : null;
-    }
-
-    //#endregion
 
     //#region on-status reason
 

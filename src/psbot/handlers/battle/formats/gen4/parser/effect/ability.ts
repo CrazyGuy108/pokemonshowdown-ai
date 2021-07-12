@@ -173,6 +173,64 @@ async function onBlockUnordered(ctx: BattleParserContext<"gen4">,
     return [ability, await ability.onBlock(ctx, accept, side, hitBy)];
 }
 
+// TODO: refactor hitBy to include other unboost effect sources, e.g. intimidate
+/**
+ * Creates an EventInference parser that expects an on-`tryUnboost` ability to
+ * activate if possible.
+ * @param side Pokemon reference who could have such an ability.
+ * @param hitBy Move+user ref that the holder is being hit by.
+ */
+export function onTryUnboost(ctx: BattleParserContext<"gen4">, side: SideID,
+    hitBy: dex.MoveAndUserRef)
+{
+    // if move user ignores the target's abilities, then this function can't be
+    //  called
+    // note: these types of abilities are always(?) made known when they're in
+    //  effect
+    // TODO: add a SubReason for this as a consistency check?
+    const hitByUser = ctx.state.getTeam(hitBy.userRef).active;
+    if (ignoresTargetAbility(hitByUser)) return null;
+
+    const boostEffect = hitBy.move.getBoostEffects("hit", hitByUser.types);
+    let {boosts} = boostEffect;
+    if (boostEffect.set) boosts = {};
+
+    const mon = ctx.state.getTeam(side).active;
+    const abilities = getAbilities(mon,
+        ability => ability.canBlockUnboost(boosts));
+    return new inference.EventInference(new Set(abilities.values()),
+        onTryUnboostImpl, side, abilities);
+}
+
+async function onTryUnboostImpl(ctx: BattleParserContext<"gen4">,
+    accept: inference.AcceptCallback, side: SideID,
+    abilities: Map<dex.Ability, inference.SubInference>):
+    Promise<Partial<dex.BoostTable<true>> | undefined>
+{
+    const parsers:
+        AbilityParser<[dex.Ability, Partial<dex.BoostTable<true>>]>[] = [];
+    for (const ability of abilities.keys())
+    {
+        parsers.push(unordered.createUnorderedDeadline(onTryUnboostUnordered,
+                /*reject*/ undefined, ability, side));
+    }
+
+    const oneOfRes = await unordered.oneOf(ctx, parsers);
+    if (oneOfRes[0])
+    {
+        const [acceptedAbility, blockResult] = oneOfRes[1];
+        accept(abilities.get(acceptedAbility!)!);
+        return blockResult;
+    }
+}
+
+async function onTryUnboostUnordered(ctx: BattleParserContext<"gen4">,
+    accept: unordered.AcceptCallback, ability: dex.Ability, side: SideID):
+    Promise<[dex.Ability, Partial<dex.BoostTable<true>>]>
+{
+    return [ability, await ability.onTryUnboost(ctx, accept, side)];
+}
+
 /** Checks if a pokemon's ability definitely ignores the target's abilities. */
 function ignoresTargetAbility(mon: ReadonlyPokemon): boolean
 {
