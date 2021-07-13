@@ -1,6 +1,6 @@
 /**
- * Checks whether `x` is a subset of `y` or whether they're independent.
- * @param x First set.
+ * Checks whether `y` is a subset of `x` or whether they're independent.
+ * @param x First set. If empty, this function returns false.
  * @param y Second set.
  * @param negative Whether to flip the boolean result.
  * @returns `true` if `y` is a subset of `x`, or `false` if `x` and `y` are

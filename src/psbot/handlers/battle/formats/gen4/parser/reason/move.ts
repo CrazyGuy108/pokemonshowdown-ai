@@ -48,7 +48,7 @@ class MoveIsType extends inference.SubReason
     /**
      * Hidden Power type and item snapshots for making inferences in retrospect.
      */
-    private readonly partialUser: Pick<Pokemon, "hpType" | "item">;
+    private readonly partialUser: dex.MoveUserSnapshot;
 
     constructor(private readonly move: dex.Move, user: Pokemon,
         private readonly types: Set<dex.Type>,
@@ -61,6 +61,8 @@ class MoveIsType extends inference.SubReason
     /** @override */
     public canHold(): boolean | null
     {
+        // if all of the move's possible types are contained by our given types,
+        //  then the assertion holds
         return subsetOrIndependent(this.types,
             this.move.getPossibleTypes(this.partialUser), this.negative);
     }

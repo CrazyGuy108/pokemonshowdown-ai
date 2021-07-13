@@ -75,7 +75,7 @@ export class Move
 
     // TODO: encapsulate type-related methods into a PossibilityClass-like api
     /** Gets all the possible effective types of a move based on its user. */
-    public getPossibleTypes(user: MoveUserSnapshot): Set<dexutil.Type>
+    public getPossibleTypes(user: ReadonlyMoveUserSnapshot): Set<dexutil.Type>
     {
         // TODO: also include naturalgift and others
         switch (this.data.modifyType)
