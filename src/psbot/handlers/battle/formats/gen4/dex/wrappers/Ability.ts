@@ -7,11 +7,9 @@ import { BattleParserContext, consume, eventLoop, inference, tryPeek, tryVerify,
     unordered, verify } from "../../../../parser";
 import { dispatch, handlers as base } from "../../parser/base";
 import { boost } from "../../parser/effect/boost";
-import { isPercentDamageSilent, verifyPercentDamage } from
-    "../../parser/effect/damage";
+import { percentDamage } from "../../parser/effect/damage";
 import { updateItems } from "../../parser/effect/item";
-import { hasStatus, isStatusSilent, verifyStatus } from
-    "../../parser/effect/status";
+import { hasStatus, status, StatusEventType } from "../../parser/effect/status";
 import { chance, diffMoveType, hasAnItem, moveIsType } from
     "../../parser/reason";
 import { Pokemon, ReadonlyPokemon } from "../../state/Pokemon";
@@ -313,19 +311,19 @@ export class Ability
 
     /**
      * Checks whether the ability can block the given status.
-     * @param status Status to check.
+     * @param statusType Status to check.
      * @param weather Current weather.
      * @param allowSilent Whether to allow silent activation. Default true.
      */
-    public canBlockStatus(status: StatusType,
+    public canBlockStatus(statusType: StatusType,
         weather: WeatherType | "none", allowSilent = true): boolean
     {
         const condition = this.data.on?.block?.status;
         return (condition === true || condition === weather) &&
             !!this.data.statusImmunity &&
             (allowSilent ?
-                !!this.data.statusImmunity[status]
-                : this.data.statusImmunity[status] === true);
+                !!this.data.statusImmunity[statusType]
+                : this.data.statusImmunity[statusType] === true);
     }
 
     /**
@@ -553,29 +551,15 @@ export class Ability
      * @param accept Callback to accept this pathway.
      * @param side Ability holder reference.
      * @param percent Percent damage to apply.
-     * @param hitByUseRef User ref of the move the holder is being hit by.
+     * @param hitByUserRef User ref of the move the holder is being hit by.
      */
     private async blockMoveHeal(ctx: BattleParserContext<"gen4">,
         accept: unordered.AcceptCallback, side: SideID,
-        percent: number, hitByUseRef: SideID): Promise<AbilityBlockResult>
+        percent: number, hitByUserRef: SideID): Promise<AbilityBlockResult>
     {
-        const mon = ctx.state.getTeam(side).active;
-        // effect would do nothing
-        if (isPercentDamageSilent(percent, mon.hp.current, mon.hp.max))
-        {
-            return {};
-        }
-
-        // parse initial event indicating heal effect
-        const event = await tryVerify(ctx, "|-heal|");
-        if (!event) return {};
-        if (!verifyPercentDamage(ctx, event, side, percent)) return {};
-        if (!this.isEventFromAbility(event)) return {};
-        if (!event.kwArgs.of) return {};
-        const identOf = Protocol.parsePokemonIdent(event.kwArgs.of);
-        if (identOf.player !== hitByUseRef) return {};
-        accept();
-        await base["|-heal|"](ctx);
+        const damageRes = await this.percentDamage(ctx, accept, side, percent,
+            hitByUserRef);
+        if (damageRes !== true) return {};
         return {immune: true};
     }
 
@@ -590,15 +574,9 @@ export class Ability
         accept: unordered.AcceptCallback, side: SideID, statusType: StatusType):
         Promise<AbilityBlockResult>
     {
-        const mon = ctx.state.getTeam(side).active;
-        if (isStatusSilent(mon, [statusType])) return {};
-
-        const event = await tryVerify(ctx, "|-start|");
-        if (!event) return {};
-        if (!verifyStatus(event, side, [statusType])) return {};
-        if (!this.isEventFromAbility(event)) return {};
-        accept();
-        await base["|-start|"](ctx);
+        const statusRes = await this.status(ctx, accept, side, [statusType]);
+        // true=silent, undefined=invalid
+        if (typeof statusRes !== "string") return {};
         return {immune: true};
     }
 
@@ -850,27 +828,12 @@ export class Ability
         // istanbul ignore next: should never happen
         if (!effectData) return;
 
+        // damage hit-by user
         if (effectData.percentDamage)
         {
-            const mon = ctx.state.getTeam(hitByUserRef).active;
-            if (isPercentDamageSilent(effectData.percentDamage, mon.hp.current,
-                mon.hp.max))
-            {
-                return;
-            }
-            const event = await tryVerify(ctx, "|-damage|");
-            if (!event) return;
-            if (!verifyPercentDamage(ctx, event, hitByUserRef,
-                effectData.percentDamage))
-            {
-                return;
-            }
-            if (!this.isEventFromAbility(event)) return;
-            if (!event.kwArgs.of) return;
-            const identOf = Protocol.parsePokemonIdent(event.kwArgs.of);
-            if (identOf.player !== side) return;
-            accept();
-            await base["|-damage|"](ctx);
+            const damageRes = await this.percentDamage(ctx, accept,
+                hitByUserRef, effectData.percentDamage, side);
+            if (damageRes !== true) return;
 
             // also check for item updates since we caused damage
             await updateItems(ctx);
@@ -905,45 +868,18 @@ export class Ability
         // istanbul ignore next: should never happen
         if (!effectData) return;
 
-        const mon = ctx.state.getTeam(hitByUserRef).active;
         if (effectData.percentDamage)
         {
-            if (isPercentDamageSilent(effectData.percentDamage, mon.hp.current,
-                mon.hp.max))
-            {
-                return;
-            }
-            const event = await tryVerify(ctx, "|-damage|");
-            if (!event) return;
-            if (!verifyPercentDamage(ctx, event, hitByUserRef,
-                effectData.percentDamage))
-            {
-                return;
-            }
-            if (!this.isEventFromAbility(event)) return;
-            if (!event.kwArgs.of) return;
-            const identOf = Protocol.parsePokemonIdent(event.kwArgs.of);
-            if (identOf.player !== side) return;
-            accept();
-            await base["|-damage|"](ctx);
+            const damageRes = await this.percentDamage(ctx, accept,
+                hitByUserRef, effectData.percentDamage, side);
+            if (damageRes !== true) return;
         }
         else if (effectData.status)
         {
-            if (isStatusSilent(mon, effectData.status)) return;
-            const event = await tryVerify(ctx, "|-start|", "|-status|",
-                "|-message|");
-            if (!event) return;
-            if (!verifyStatus(event, hitByUserRef, effectData.status)) return;
-            if (event.args[0] !== "-message")
-            {
-                const ev = event as Event<"|-start|" | "|-status|">;
-                if (!this.isEventFromAbility(ev)) return;
-                if (!ev.kwArgs.of) return;
-                const identOf = Protocol.parsePokemonIdent(ev.kwArgs.of);
-                if (identOf.player !== side) return;
-            }
-            accept();
-            await dispatch(ctx);
+            const statusRes = await this.status(ctx, accept, hitByUserRef,
+                effectData.status, side);
+            // true=silent, undefined=invalid
+            if (typeof statusRes !== "string") return;
         }
 
         // also check for item updates since we caused damage or afflicted a
@@ -1025,21 +961,10 @@ export class Ability
         accept: unordered.AcceptCallback, side: SideID, hitByUserRef: SideID):
         Promise<"invert" | undefined>
     {
-        const mon = ctx.state.getTeam(hitByUserRef).active;
         // TODO: expect actual drain damage amount?
-        if (isPercentDamageSilent(-1, mon.hp.current, mon.hp.max))
-        {
-            return;
-        }
-        const event = await tryVerify(ctx, "|-damage|");
-        if (!event) return;
-        if (!verifyPercentDamage(ctx, event, hitByUserRef, -1)) return;
-        if (!this.isEventFromAbility(event)) return;
-        if (!event.kwArgs.of) return;
-        const identOf = Protocol.parsePokemonIdent(event.kwArgs.of);
-        if (identOf.player !== side) return;
-        accept();
-        await base["|-damage|"](ctx);
+        const damageRes = await this.percentDamage(ctx, accept, hitByUserRef,
+            -1, side);
+        if (damageRes !== true) return;
 
         // also check for item updates since we caused damage
         await updateItems(ctx);
@@ -1050,6 +975,74 @@ export class Ability
     //#endregion
 
     //#region on-x helper methods
+
+    /**
+     * Expects an event for a percent-damage effect with the correct `[from]`
+     * suffix.
+     * @param accept Callback to accept this pathway.
+     * @param side Pokemon reference receiving the damage.
+     * @param percent Percent damage to deal.
+     * @param of Pokemon that should be referenced by the event's `[of]` suffix.
+     * Optional.
+     * @returns `true` if the effect was parsed, `"silent"` if the effect is a
+     * no-op, or `undefined` if the effect wasn't parsed.
+     * @see {@link percentDamage}
+     */
+    private async percentDamage(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID, percent: number,
+        of?: SideID): ReturnType<typeof percentDamage>
+    {
+        return await percentDamage(ctx, side, percent,
+            event =>
+            {
+                if (!this.isEventFromAbility(event)) return false;
+                if (of)
+                {
+                    if (!event.kwArgs.of) return false;
+                    const identOf = Protocol.parsePokemonIdent(event.kwArgs.of);
+                    if (identOf.player !== of) return false;
+                }
+                accept();
+                return true;
+            });
+    }
+
+    /**
+     * Expects an event for a status effect with the correct `[from]` suffix.
+     * @param accept Callback to accept this pathway.
+     * @param side Pokemon reference to which to afflict the status.
+     * @param statusTypes Possible statuses to afflict.
+     * @param of Pokemon that should be referenced by the event's `[of]` suffix.
+     * Optional.
+     * @returns The status type that was consumed, or `true` if the effect
+     * couldn't be applied and was a no-op, or `undefined` if no valid event was
+     * found.
+     * @see {@link status}
+     */
+    private async status(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID,
+        statusTypes: readonly StatusType[], of?: SideID):
+        ReturnType<typeof status>
+    {
+        return await status(ctx, side, statusTypes,
+            event =>
+            {
+                if (event.args[0] !== "-message")
+                {
+                    const e = event as
+                        Event<Exclude<StatusEventType, "|-message|">>;
+                    if (!this.isEventFromAbility(e)) return false;
+                    if (of)
+                    {
+                        if (!e.kwArgs.of) return false;
+                        const identOf = Protocol.parsePokemonIdent(e.kwArgs.of);
+                        if (identOf.player !== of) return false;
+                    }
+                }
+                accept();
+                return true;
+            });
+    }
 
     /**
      * Verifies that the event's `[from]` effect suffix matches this Ability.
@@ -1096,8 +1089,8 @@ export class Ability
         {
             statusTypes = Object.keys(this.data.statusImmunity) as StatusType[];
         }
-        return statusTypes.some(s => this.data.statusImmunity![s] &&
-                hasStatus(mon, s));
+        return statusTypes.some(
+            s => this.data.statusImmunity![s] && hasStatus(mon, s));
     }
 
     /**

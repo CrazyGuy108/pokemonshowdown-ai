@@ -16,14 +16,24 @@ export interface StatusResult
 }
 
 /**
+ * Event types that could contain information about statuses.
+ * @see {@link status}
+ */
+export type StatusEventType = "|-start|" | "|-status|" | "|-singlemove|" |
+    "|-singleturn|" | "|-message|";
+
+/**
  * Expects a status effect.
- * @param targetRef Target pokemon reference.
+ * @param side Target pokemon reference.
  * @param statusTypes Possible statuses to afflict.
+ * @param pred Optional additional custom check on the event before it can be
+ * parsed. If it returns `false` then the event won't be parsed.
  * @returns The status type that was consumed, or `true` if the effect couldn't
- * be applied, or `undefined` if no valid event was found.
+ * be applied and was a no-op, or `undefined` if no valid event was found.
  */
 export async function status(ctx: BattleParserContext<"gen4">, side: SideID,
-    statusTypes: readonly dex.StatusType[]):
+    statusTypes: readonly dex.StatusType[],
+    pred?: (event: Event<StatusEventType>) => boolean):
     Promise<true | dex.StatusType | undefined>
 {
     const mon = ctx.state.getTeam(side).active;
@@ -35,6 +45,8 @@ export async function status(ctx: BattleParserContext<"gen4">, side: SideID,
     if (!event) return;
     const res = verifyStatus(event, side, statusTypes);
     if (!res) return;
+    // TODO: also pass info that was parsed from the event?
+    if (pred && !pred(event)) return;
     await dispatch(ctx);
     return res;
 }
@@ -46,11 +58,11 @@ export async function status(ctx: BattleParserContext<"gen4">, side: SideID,
  * @param statusTypes Possible statuses to afflict.
  * @returns Whether the event matches one of the `statusTypes`.
  */
-export function verifyStatus(
+function verifyStatus(
     event: Event<"|-start|" | "|-status|" | "|-singlemove|" | "|-singleturn|" |
         "|-message|">,
     side: SideID, statusTypes: readonly dex.StatusType[]):
-    dex.StatusType | false
+    dex.StatusType | undefined
 {
     if (event.args[0] === "-message")
     {
@@ -58,14 +70,14 @@ export function verifyStatus(
         {
             if (statusTypes.includes("slp")) return "slp";
         }
-        return false;
+        return;
     }
 
     const [, identStr, effectStr] = event.args;
     const ident = Protocol.parsePokemonIdent(identStr);
-    if (ident.player !== side) return false;
+    if (ident.player !== side) return;
     const effect = Protocol.parseEffect(effectStr, toIdName);
-    if (!statusTypes.includes(effect.name as dex.StatusType)) return false;
+    if (!statusTypes.includes(effect.name as dex.StatusType)) return;
     return effect.name as dex.StatusType;
 }
 
@@ -74,7 +86,7 @@ export function verifyStatus(
  * @param mon Target pokemon.
  * @param statusTypes Possible statuses to afflict.
  */
-export function isStatusSilent(mon: ReadonlyPokemon,
+function isStatusSilent(mon: ReadonlyPokemon,
     statusTypes: readonly dex.StatusType[]): boolean
 {
     return statusTypes.every(s => cantStatus(mon, s));
@@ -82,8 +94,7 @@ export function isStatusSilent(mon: ReadonlyPokemon,
 
 // TODO: factor out status handlers for each status type?
 /** Checks whether the pokemon can't be afflicted by the given status. */
-function cantStatus(mon: ReadonlyPokemon, statusType: dex.StatusType):
-    boolean
+function cantStatus(mon: ReadonlyPokemon, statusType: dex.StatusType): boolean
 {
     switch (statusType)
     {

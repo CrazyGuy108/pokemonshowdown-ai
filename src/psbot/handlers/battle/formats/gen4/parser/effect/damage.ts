@@ -8,14 +8,18 @@ import { dispatch } from "../base";
 
 /**
  * Expects a percentDamage effect.
- * @param targetRef Target pokemon reference.
+ * @param side Target pokemon reference.
  * @param percent Percent damage to deal to the target. Positive heals, negative
  * damages.
+ * @param pred Optional additional custom check on the event before it can be
+ * parsed. If it returns `false` then the event won't be parsed.
  * @returns `true` if the effect was parsed, `"silent"` if the effect is a
  * no-op, or `undefined` if the effect wasn't parsed.
  */
 export async function percentDamage(ctx: BattleParserContext<"gen4">,
-    side: SideID, percent: number): Promise<true | "silent" | undefined>
+    side: SideID, percent: number,
+    pred?: (event: Event<"|-damage|" | "|-heal|">) => boolean):
+    Promise<true | "silent" | undefined>
 {
     const mon = ctx.state.getTeam(side).active;
     // effect would do nothing
@@ -28,9 +32,24 @@ export async function percentDamage(ctx: BattleParserContext<"gen4">,
     const event = await tryVerify(ctx, "|-damage|", "|-heal|");
     if (!event) return;
     if (!verifyPercentDamage(ctx, event, side, percent)) return;
+    // TODO: also pass info that was parsed from the event?
+    if (pred && !pred(event)) return;
 
     await dispatch(ctx);
     return true;
+}
+
+/**
+ * Checks whether a percent-damage effect would be silent.
+ * @param percent Percent damage.
+ * @param hp Current hp.
+ * @param hpMax Max hp.
+ */
+function isPercentDamageSilent(percent: number, hp: number, hpMax: number):
+    boolean
+{
+    // can't heal when full or damage when fainted
+    return (percent > 0 && hp >= hpMax) || (percent < 0 && hp <= 0);
 }
 
 /**
@@ -41,7 +60,7 @@ export async function percentDamage(ctx: BattleParserContext<"gen4">,
  * damages.
  * @returns Whether the event matches the `percent` damage effect.
  */
-export function verifyPercentDamage(ctx: BattleParserContext<"gen4">,
+function verifyPercentDamage(ctx: BattleParserContext<"gen4">,
     event: Event<"|-damage|" | "|-heal|">, side: SideID, percent: number):
     boolean
 {
@@ -64,7 +83,7 @@ export function verifyPercentDamage(ctx: BattleParserContext<"gen4">,
  * @returns `true` if `newHp` is valid for the given effect, `"silent"` if the
  * effect is a no-op, or `false` if the `newHp` number doesn't match the effect.
  */
-export function checkPercentDamage(mon: ReadonlyPokemon, percent: number,
+function checkPercentDamage(mon: ReadonlyPokemon, percent: number,
     newHp: number): boolean
 {
     // verify hp difference with respect to the sign of the percentage
@@ -75,17 +94,4 @@ export function checkPercentDamage(mon: ReadonlyPokemon, percent: number,
         (percent > 0 && newHp >= mon.hp.current) ||
         // istanbul ignore next: should never happen, but can recover from it
         (percent === 0 && newHp === mon.hp.current);
-}
-
-/**
- * Checks whether a percent-damage effect would be silent.
- * @param percent Percent damage.
- * @param hp Current hp.
- * @param hpMax Max hp.
- */
-export function isPercentDamageSilent(percent: number, hp: number,
-    hpMax: number): boolean
-{
-    // can't heal when full or damage when fainted
-    return (percent > 0 && hp >= hpMax) || (percent < 0 && hp <= 0);
 }
