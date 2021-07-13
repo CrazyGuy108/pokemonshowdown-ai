@@ -15,6 +15,7 @@ import { hasAbility } from "../reason/ability";
 type AbilityParser<TResult = dex.Ability> =
     unordered.UnorderedDeadline<"gen4", BattleAgent<"gen4">, TResult>;
 
+// TODO: refactor/move to separate helper files?
 /**
  * Creates an EventInference parser that expects an on-`switchOut` ability to
  * activate if possible.

@@ -80,6 +80,7 @@ export function isStatusSilent(mon: ReadonlyPokemon,
     return statusTypes.every(s => cantStatus(mon, s));
 }
 
+// TODO: factor out status handlers for each status type?
 /** Checks whether the pokemon can't be afflicted by the given status. */
 function cantStatus(mon: ReadonlyPokemon, statusType: dex.StatusType):
     boolean
@@ -108,6 +109,40 @@ function cantStatus(mon: ReadonlyPokemon, statusType: dex.StatusType):
             if (dex.isMajorStatus(statusType))
             {
                 return !!mon.majorStatus.current;
+            }
+            // istanbul ignore next: should never happen
+            throw new Error(`Invalid status effect '${statusType}'`);
+    }
+}
+
+/** Checks whether the pokemon has the given status. */
+export function hasStatus(mon: ReadonlyPokemon, statusType: dex.StatusType):
+    boolean
+{
+    switch (statusType)
+    {
+        case "aquaring": case "attract": case "curse": case "flashfire":
+        case "focusenergy": case "imprison": case "ingrain":
+        case "leechseed": case "mudsport": case "nightmare":
+        case "powertrick": case "substitute": case "suppressAbility":
+        case "torment": case "watersport":
+        case "destinybond": case "grudge": case "rage": // singlemove
+        case "magiccoat": case "roost": case "snatch": // singleturn
+            return mon.volatile[statusType];
+        case "bide": case "confusion": case "charge": case "magnetrise":
+        case "embargo": case "healblock": case "slowstart": case "taunt":
+        case "uproar": case "yawn":
+            return mon.volatile[statusType].isActive;
+        case "encore":
+            return mon.volatile[statusType].ts.isActive;
+        case "endure": case "protect": // stall
+            return mon.volatile.stalling;
+        case "foresight": case "miracleeye":
+            return mon.volatile.identified === statusType;
+        default:
+            if (dex.isMajorStatus(statusType))
+            {
+                return mon.majorStatus.current === statusType;
             }
             // istanbul ignore next: should never happen
             throw new Error(`Invalid status effect '${statusType}'`);

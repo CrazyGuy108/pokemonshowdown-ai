@@ -10,7 +10,8 @@ import { boost } from "../../parser/effect/boost";
 import { isPercentDamageSilent, verifyPercentDamage } from
     "../../parser/effect/damage";
 import { updateItems } from "../../parser/effect/item";
-import { isStatusSilent, verifyStatus } from "../../parser/effect/status";
+import { hasStatus, isStatusSilent, verifyStatus } from
+    "../../parser/effect/status";
 import { chance, diffMoveType, hasAnItem, moveIsType } from
     "../../parser/reason";
 import { Pokemon, ReadonlyPokemon } from "../../state/Pokemon";
@@ -1048,7 +1049,7 @@ export class Ability
 
     //#endregion
 
-    //#region general helper methods
+    //#region on-x helper methods
 
     /**
      * Verifies that the event's `[from]` effect suffix matches this Ability.
@@ -1096,7 +1097,7 @@ export class Ability
             statusTypes = Object.keys(this.data.statusImmunity) as StatusType[];
         }
         return statusTypes.some(s => this.data.statusImmunity![s] &&
-            hasStatus(mon, s));
+                hasStatus(mon, s));
     }
 
     /**
@@ -1154,11 +1155,11 @@ export class Ability
         });
     }
 
-    // TODO: generalize for multiple immunities, e.g. wonderguard
     /** Gets the ability's move type immunity, or null if none found. */
     public getTypeImmunity(): Type | null
     {
         const type = this.data.on?.block?.move?.type;
+        // TODO: generalize for multiple immunities, e.g. wonderguard
         if (!type || type === "nonSuper") return null;
         return type;
     }
