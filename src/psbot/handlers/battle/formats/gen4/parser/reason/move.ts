@@ -1,8 +1,19 @@
 /** @file SubReason helpers related to moves. */
 import { inference } from "../../../../parser";
 import * as dex from "../../dex";
-import { Pokemon } from "../../state/Pokemon";
-import { PossibilityClass } from "../../state/PossibilityClass";
+import { Pokemon, ReadonlyPokemon } from "../../state/Pokemon";
+
+/**
+ * Creates a SubReason that asserts that the pokemon isn't the same type as the
+ * move being used against it. Inference applies to the move/user.
+ * @param mon Pokemon to track.
+ * @param hitBy Move+user that the pokemon is being hit by.
+ */
+export function diffMoveType(mon: ReadonlyPokemon, hitBy: dex.MoveAndUser):
+    inference.SubReason
+{
+    return moveIsntType(hitBy.move, hitBy.user, new Set(mon.types));
+}
 
 /**
  * Creates a SubReason that asserts that the move being used by the given

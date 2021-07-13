@@ -286,6 +286,59 @@ async function onStatusUnordered(ctx: BattleParserContext<"gen4">,
 }
 
 /**
+ * Creates an EventInference parser that expects an on-`moveDamage` ability or
+ * its variants to activate if possible.
+ * @param side Pokemon reference who could have such an ability.
+ * @param qualifier The qualifier of which effects the ability may activate.
+ * @param hitBy Move+user ref the holder is being hit by.
+ */
+export function onMoveDamage(ctx: BattleParserContext<"gen4">, side: SideID,
+    qualifier: "damage" | "contact" | "contactKO", hitBy: dex.MoveAndUserRef)
+{
+    let on: dex.AbilityOn;
+    switch (qualifier)
+    {
+        case "damage": on = "moveDamage"; break;
+        case "contact": on = "moveContact"; break;
+        case "contactKO": on = "moveContactKO"; break;
+    }
+
+    const mon = ctx.state.getTeam(side).active;
+    const hitByUser = ctx.state.getTeam(hitBy.userRef).active;
+    const hitByArg: dex.MoveAndUser = {move: hitBy.move, user: hitByUser};
+    const abilities = getAbilities(mon,
+        ability => ability.canMoveDamage(mon, on, hitByArg));
+
+    return new inference.EventInference(new Set(abilities.values()),
+        onMoveDamageImpl, abilities, on, side, hitBy);
+}
+
+async function onMoveDamageImpl(ctx: BattleParserContext<"gen4">,
+    accept: inference.AcceptCallback,
+    abilities: Map<dex.Ability, inference.SubInference>, on: dex.AbilityOn,
+    side: SideID, hitBy: dex.MoveAndUserRef): Promise<void>
+{
+    const parsers: AbilityParser[] = [];
+    for (const ability of abilities.keys())
+    {
+        parsers.push(unordered.createUnorderedDeadline(onMoveDamageUnordered,
+                /*reject*/ undefined, ability, on, side, hitBy));
+    }
+
+    const [ok, acceptedAbility] = await unordered.oneOf(ctx, parsers);
+    if (ok) accept(abilities.get(acceptedAbility!)!);
+}
+
+async function onMoveDamageUnordered(ctx: BattleParserContext<"gen4">,
+    accept: unordered.AcceptCallback, ability: dex.Ability, on: dex.AbilityOn,
+    side: SideID, hitBy: dex.MoveAndUserRef):
+    Promise<dex.Ability>
+{
+    await ability.onMoveDamage(ctx, accept, on, side, hitBy);
+    return ability;
+}
+
+/**
  * Searches for possible ability pathways based on the given predicate.
  * @param mon Pokemon to search.
  * @param prove Callback for filtering eligible abilities. Should return a set

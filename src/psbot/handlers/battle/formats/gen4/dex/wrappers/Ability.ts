@@ -9,12 +9,14 @@ import { dispatch, handlers as base } from "../../parser/base";
 import { boost } from "../../parser/effect/boost";
 import { isPercentDamageSilent, verifyPercentDamage } from
     "../../parser/effect/damage";
+import { updateItems } from "../../parser/effect/item";
 import { isStatusSilent, verifyStatus } from "../../parser/effect/status";
-import { chance, hasAnItem, moveIsType } from "../../parser/reason";
+import { chance, diffMoveType, hasAnItem, moveIsType } from
+    "../../parser/reason";
 import { Pokemon, ReadonlyPokemon } from "../../state/Pokemon";
 import { getMove } from "../dex";
 import { AbilityData, AbilityOn, BoostTable, StatusType } from "../dex-util";
-import { Move, MoveAndUserRef } from "./Move";
+import { Move, MoveAndUser, MoveAndUserRef } from "./Move";
 
 /** Result from `Ability#onBlock(). */
 export interface AbilityBlockResult
@@ -745,175 +747,230 @@ export class Ability
 
     //#endregion
 
-    //#region on-moveContactKO/moveContact/moveDamage parsers
+    //#region on-moveContactKO/moveContact/moveDamage
+
+    /**
+     * Checks whether the ability can activate
+     * on-`moveDamage`/`moveContact`/`moveContactKO`.
+     * @param mon Potential ability holder.
+     * @param on Specific on-`X` condition.
+     * @param hitBy Move+user that the holder was hit by.
+     * @returns A Set of SubReasons describing additional conditions of
+     * activation, or the empty set if there are none, or null if it cannot
+     * activate.
+     */
+    public canMoveDamage(mon: Pokemon, on: AbilityOn, hitBy: MoveAndUser):
+        Set<inference.SubReason> | null
+    {
+        if (!this.data.on) return null;
+        if (this.data.on.moveDamage &&
+            // can't include moveContactKO since the only relevant effect
+            //  affects the ability holder
+            ["moveDamage", "moveContact"].includes(on))
+        {
+            if (this.data.on.moveDamage.changeToMoveType && !mon.fainted)
+            {
+                return new Set([diffMoveType(mon, hitBy)]);
+            }
+        }
+        if (this.data.on.moveContact &&
+            ["moveContact", "moveContactKO"].includes(on))
+        {
+            // TODO: silent status-immunity check?
+            const chanceNum = this.data.on.moveContact.chance ?? 100;
+            return new Set(chanceNum === 100 ? [] : [chance]);
+        }
+        if (this.data.on.moveContactKO && on === "moveContactKO")
+        {
+            // TODO: silent damp check?
+            return new Set();
+        }
+        return null;
+    }
 
     /**
      * Activates an ability on-`moveContactKO`/`moveContact`/`moveDamage`.
+     * @param accept Callback to accept this pathway.
      * @param on Which on-`X` we're talking about.
      * @param side Ability holder reference.
-     * @param hitBy Move+user that the holder was hit by, if applicable.
+     * @param hitBy Move+user ref that the holder was hit by.
      */
-    public async onMoveDamage(ctx: BattleParserContext<"gen4">, on: dexutil.AbilityOn,
-        side: SideID, hitBy?: dexutil.MoveAndUserRef):
-        Promise<AbilityResult>
+    public async onMoveDamage(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, on: AbilityOn, side: SideID,
+        hitBy: MoveAndUserRef): Promise<void>
     {
-        if (!hitBy)
-        {
-            throw new Error(`On-${on} effect failed: ` +
-                "Attacking move/user not specified.");
-        }
         switch (on)
         {
             case "moveContactKO":
                 if (this.data.on?.moveContactKO)
                 {
-                    return await this.moveContactKO(ctx, side,
+                    return await this.moveContactKO(ctx, accept, side,
                         hitBy.userRef);
                 }
-                // fallthrough: `on` may be overqualified
+                // fallthrough: contactKO also applies to contact in general
             case "moveContact":
                 if (this.data.on?.moveContact)
                 {
-                    return await this.moveContact(ctx, side,
+                    return await this.moveContact(ctx, accept, side,
                         hitBy.userRef);
                 }
-                // fallthrough: `on` may be overqualified
+                // fallthrough: contact also applies to damage in general
             case "moveDamage":
                 if (this.data.on?.moveDamage)
                 {
                     // colorchange
                     if (this.data.on.moveDamage.changeToMoveType &&
-                        // this effect target's holder so can't activate if ko'd
+                        // affects holder so can't activate if ko'd
                         on !== "moveContactKO")
                     {
-                        return await this.changeToMoveType(ctx, side,
+                        return await this.changeToMoveType(ctx, accept, side,
                             hitBy);
                     }
                 }
-                // fallthrough: no viable activation effects
+                break;
             default:
-                throw new Error(`On-${on} effect shouldn't activate for ` +
-                    `ability '${this.data.name}'`);
+                // istanbul ignore next: should never happen
+                throw new Error(`Invalid on-moveDamage-like type '${on}'`);
         }
     }
 
     /**
      * Handles events due to a moveContactKO ability (e.g. Aftermath).
+     * @param accept Callback to accept this pathway.
+     * @param side Ability holder reference.
      * @param hitByUserRef Pokemon reference to the user of the move by which
      * the ability holder was hit.
      */
-    private async moveContactKO(ctx: BattleParserContext<"gen4">, side: SideID,
-        hitByUserRef: SideID): Promise<AbilityResult>
+    private async moveContactKO(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID, hitByUserRef: SideID):
+        Promise<void>
     {
         const effectData = this.data.on?.moveContactKO;
         // istanbul ignore next: should never happen
-        if (!effectData) throw new Error("On-moveContactKO effect failed");
+        if (!effectData) return;
 
-        await this.verifyInitialEvent(ctx, side);
-
-        let silent = true;
         if (effectData.percentDamage)
         {
-            const damageResult = await parsers.percentDamage(ctx,
-                hitByUserRef, effectData.percentDamage);
-            if (!damageResult.success)
+            const mon = ctx.state.getTeam(hitByUserRef).active;
+            if (isPercentDamageSilent(effectData.percentDamage, mon.hp.current,
+                mon.hp.max))
             {
-                throw new Error("On-moveContactKO " +
-                    (effectData.explosive ? "explosive " : "") +
-                    "percentDamage effect failed");
+                return;
             }
-            // TODO: permHalt check?
-            silent &&= damageResult.success === "silent";
-            // update items
-            await parsers.update(ctx);
-        }
+            const event = await tryVerify(ctx, "|-damage|");
+            if (!event) return;
+            if (!verifyPercentDamage(ctx, event, hitByUserRef,
+                effectData.percentDamage))
+            {
+                return;
+            }
+            if (!this.isEventFromAbility(event)) return;
+            if (!event.kwArgs.of) return;
+            const identOf = Protocol.parsePokemonIdent(event.kwArgs.of);
+            if (identOf.player !== side) return;
+            accept();
+            await base["|-damage|"](ctx);
 
-        // if the ability effects can't cause an explicit game event, then it
-        //  shouldn't have activated in the first place
-        if (silent) throw new Error("On-moveContactKO effect failed");
+            // also check for item updates since we caused damage
+            await updateItems(ctx);
+            return;
+        }
 
         if (effectData.explosive)
         {
             // assert non-explosive-blocking ability (damp)
-            const hitByUser = ctx.state.teams[hitByUserRef].active;
+            // TODO(doubles): assert for all active mons
+            const hitByUser = ctx.state.getTeam(hitByUserRef).active;
             if (!hitByUser.volatile.suppressAbility)
             {
                 hitByUser.traits.ability.remove(
                     (_, a) => !!a.on?.block?.effect?.explosive);
             }
         }
-
-        return {};
     }
 
     /**
      * Handles events due to a moveContact ability (e.g. Rough Skin).
+     * @param accept Callback to accept this pathway.
+     * @param side Ability holder reference.
      * @param hitByUserRef Pokemon reference to the user of the move by which
      * the ability holder was hit.
      */
-    private async moveContact(ctx: BattleParserContext<"gen4">, side: SideID,
-        hitByUserRef: SideID): Promise<AbilityResult>
+    private async moveContact(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID, hitByUserRef: SideID):
+        Promise<void>
     {
         const effectData = this.data.on?.moveContact;
         // istanbul ignore next: should never happen
-        if (!effectData) throw new Error("On-moveContact effect failed");
+        if (!effectData) return;
 
-        await this.verifyInitialEvent(ctx, side);
-
-        let silent = true;
+        const mon = ctx.state.getTeam(hitByUserRef).active;
         if (effectData.percentDamage)
         {
-            const damageResult = await parsers.percentDamage(ctx,
-                hitByUserRef, effectData.percentDamage);
-            if (!damageResult.success)
+            if (isPercentDamageSilent(effectData.percentDamage, mon.hp.current,
+                mon.hp.max))
             {
-                throw new Error("On-moveContact percentDamage effect " +
-                    "failed");
+                return;
             }
-            silent &&= damageResult.success === "silent";
+            const event = await tryVerify(ctx, "|-damage|");
+            if (!event) return;
+            if (!verifyPercentDamage(ctx, event, hitByUserRef,
+                effectData.percentDamage))
+            {
+                return;
+            }
+            if (!this.isEventFromAbility(event)) return;
+            if (!event.kwArgs.of) return;
+            const identOf = Protocol.parsePokemonIdent(event.kwArgs.of);
+            if (identOf.player !== side) return;
+            accept();
+            await base["|-damage|"](ctx);
         }
-        if (effectData.status)
+        else if (effectData.status)
         {
-            const statusResult = await parsers.status(ctx, hitByUserRef,
-                effectData.status);
-            if (!statusResult.success)
+            if (isStatusSilent(mon, effectData.status)) return;
+            const event = await tryVerify(ctx, "|-start|", "|-status|",
+                "|-message|");
+            if (!event) return;
+            if (!verifyStatus(event, hitByUserRef, effectData.status)) return;
+            if (event.args[0] !== "-message")
             {
-                throw new Error("On-moveContact status effect failed");
+                const ev = event as Event<"|-start|" | "|-status|">;
+                if (!this.isEventFromAbility(ev)) return;
+                if (!ev.kwArgs.of) return;
+                const identOf = Protocol.parsePokemonIdent(ev.kwArgs.of);
+                if (identOf.player !== side) return;
             }
-            silent &&= statusResult.success === true;
+            accept();
+            await dispatch(ctx);
         }
 
-        // if the ability effects can't cause an explicit game event, then it
-        //  shouldn't have activated in the first place
-        if (silent) throw new Error("On-moveContact effect failed");
-
-        return await parsers.update(ctx);
+        // also check for item updates since we caused damage or afflicted a
+        //  status
+        await updateItems(ctx);
     }
 
     /**
      * Handles events due to a changeMoveType ability (e.g. Color Change).
      * Always targets ability holder.
+     * @param accept Callback to accept this pathway.
+     * @param side Ability holder reference.
+     * @param hitBy Move+user ref that the holder was hit by.
      */
-    private async changeToMoveType(ctx: BattleParserContext<"gen4">, side: SideID,
-        hitBy: dexutil.MoveAndUserRef): Promise<AbilityResult>
+    private async changeToMoveType(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID, hitBy: MoveAndUserRef):
+        Promise<void>
     {
-        await this.verifyInitialEvent(ctx, side);
-        const next = await tryPeek(ctx);
-        if (next?.type !== "changeType" || next.monRef !== side)
-        {
-            throw new Error("On-moveDamage changeToMoveType effect failed");
-        }
-        if (next.newTypes[1] !== "???")
-        {
-            throw new Error("On-moveDamage changeToMoveType effect failed: " +
-                "Expected one type but got multiple " +
-                `(${next.newTypes.join(", ")})`);
-        }
-
-        const user = ctx.state.teams[hitBy.userRef].active;
-        hitBy.move.assertType(next.newTypes[0], user);
-
-        return await base.changeType(ctx);
+        const event = await tryVerify(ctx, "|-start|");
+        if (!event) return;
+        const [, identStr, effectStr, type] = event.args;
+        const ident = Protocol.parsePokemonIdent(identStr);
+        if (ident.player !== side) return;
+        if (effectStr !== "typechange") return;
+        accept();
+        const hitByUser = ctx.state.getTeam(hitBy.userRef).active;
+        hitBy.move.assertType(type as Type, hitByUser);
+        await base["|-start|"](ctx);
     }
 
     //#endregion
@@ -970,7 +1027,7 @@ export class Ability
 
     //#endregion
 
-    //#region general on-X parser helpers
+    //#region general helper methods
 
     /**
      * Verifies that the event's `[from]` effect suffix matches this Ability.
@@ -1090,48 +1147,6 @@ export class Ability
     //#endregion
 
     //#region canX() SubReason builders for onX() activateAbility parsers
-
-    //#region on-moveContactKO/moveContact/moveDamage reasons
-
-    /**
-     * Checks whether the ability can activate
-     * on-`moveDamage`/`moveContact`/`moveContactKO`.
-     * @param mon Potential ability holder.
-     * @param on Specific on-`X` condition.
-     * @param hitByMove Move the holder was hit by.
-     * @param hitByUser User of the `hitByMove`.
-     * @returns A Set of SubReasons describing additional conditions of
-     * activation, or the empty set if there are none, or null if it cannot
-     * activate.
-     */
-    public canMoveDamage(mon: Pokemon, on: dexutil.AbilityOn,
-        hitBy: dexutil.MoveAndUser): Set<SubReason> | null
-    {
-        if (!this.data.on) return null;
-        if (this.data.on.moveDamage &&
-            // can't include moveContactKO since the only relevant effect
-            //  affects the ability holder
-            ["moveDamage", "moveContact"].includes(on))
-        {
-            if (this.data.on.moveDamage.changeToMoveType && !mon.fainted)
-            {
-                return new Set([diffMoveType(mon, hitBy)]);
-            }
-        }
-        if (this.data.on.moveContact &&
-            ["moveContact", "moveContactKO"].includes(on))
-        {
-            const chance = this.data.on.moveContact.chance ?? 100;
-            return new Set(chance === 100 ? [] : [chanceReason]);
-        }
-        if (this.data.on.moveContactKO && on === "moveContactKO")
-        {
-            return new Set();
-        }
-        return null;
-    }
-
-    //#endregion
 
     //#region on-moveDrain reason
 
