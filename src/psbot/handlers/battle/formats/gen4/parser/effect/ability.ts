@@ -290,7 +290,7 @@ async function onStatusUnordered(ctx: BattleParserContext<"gen4">,
  * its variants to activate if possible.
  * @param side Pokemon reference who could have such an ability.
  * @param qualifier The qualifier of which effects the ability may activate.
- * @param hitBy Move+user ref the holder is being hit by.
+ * @param hitBy Move+user ref the holder was hit by.
  */
 export function onMoveDamage(ctx: BattleParserContext<"gen4">, side: SideID,
     qualifier: "damage" | "contact" | "contactKO", hitBy: dex.MoveAndUserRef)
@@ -336,6 +336,53 @@ async function onMoveDamageUnordered(ctx: BattleParserContext<"gen4">,
 {
     await ability.onMoveDamage(ctx, accept, on, side, hitBy);
     return ability;
+}
+
+// TODO: refactor hitBy to support non-move drain effects, e.g. leechseed
+/**
+ * Creates an EventInference parser that expects an on-`moveDrain` ability to
+ * activate if possible (e.g. Liquid Ooze).
+ * @param side Pokemon reference who could have such an ability.
+ * @param hitBy Move+user ref the holder was hit by.
+ */
+export function onMoveDrain(ctx: BattleParserContext<"gen4">, side: SideID,
+    hitBy: dex.MoveAndUserRef)
+{
+    const mon = ctx.state.getTeam(side).active;
+    const abilities = getAbilities(mon, ability => ability.canMoveDrain());
+
+    return new inference.EventInference(new Set(abilities.values()),
+        onMoveDrainImpl, abilities, side, hitBy);
+}
+
+async function onMoveDrainImpl(ctx: BattleParserContext<"gen4">,
+    accept: inference.AcceptCallback,
+    abilities: Map<dex.Ability, inference.SubInference>, side: SideID,
+    hitBy: dex.MoveAndUserRef): Promise<"invert" | undefined>
+{
+    const parsers: AbilityParser<[dex.Ability, "invert" | undefined]>[] = [];
+    for (const ability of abilities.keys())
+    {
+        parsers.push(unordered.createUnorderedDeadline(onMoveDrainUnordered,
+                /*reject*/ undefined, ability, side, hitBy));
+    }
+
+    const oneOfRes = await unordered.oneOf(ctx, parsers);
+    if (oneOfRes[0])
+    {
+        const [acceptedAbility, res] = oneOfRes[1];
+        accept(abilities.get(acceptedAbility!)!);
+        return res;
+    }
+}
+
+async function onMoveDrainUnordered(ctx: BattleParserContext<"gen4">,
+    accept: unordered.AcceptCallback, ability: dex.Ability, side: SideID,
+    hitBy: dex.MoveAndUserRef): Promise<[dex.Ability, "invert" | undefined]>
+{
+    return [
+        ability, await ability.onMoveDrain(ctx, accept, side, hitBy.userRef)
+    ];
 }
 
 /**

@@ -975,54 +975,75 @@ export class Ability
 
     //#endregion
 
-    //#region on-moveDrain parser
+    //#region on-moveDrain
+
+    // TODO: generalize to on-drain for leechseed status
+    /**
+     * Checks whether the ability can activate on-`moveDrain`.
+     * @returns A Set of SubReasons describing additional conditions of
+     * activation, or the empty set if there are none, or null if it cannot
+     * activate.
+     */
+    public canMoveDrain(): Set<inference.SubReason> | null
+    {
+        return this.data.on?.moveDrain ? new Set() : null;
+    }
 
     /**
      * Activates an ability on-`moveDrain`.
+     * @param accept Callback to accept this pathway.
+     * @param side Ability holder reference.
      * @param hitByUserRef Pokemon reference to the user of the draining move.
-     * Throws an error if not specified
+     * @returns `"invert"` if the drain damage was deducted instead of healed,
+     * otherwise `undefined`.
      */
-    public async onMoveDrain(ctx: BattleParserContext<"gen4">, side: SideID,
-        hitByUserRef?: SideID): Promise<AbilityResult>
+    public async onMoveDrain(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID, hitByUserRef: SideID):
+        Promise<"invert" | undefined>
     {
         if (this.data.on?.moveDrain)
         {
             // invert drain effect to damage instead of heal
             if (this.data.on.moveDrain.invert)
             {
-                if (!hitByUserRef)
-                {
-                    throw new Error("On-moveDrain invert effect failed: " +
-                        "Attacking move user not specified.");
-                }
-                return await this.invertDrain(ctx, side, hitByUserRef);
+                return await this.invertDrain(ctx, accept, side, hitByUserRef);
             }
         }
-        throw new Error("On-moveDrain effect shouldn't activate for ability " +
-            `'${this.data.name}'`);
     }
 
     /**
-     * Handles events due to an invertDrain ability (e.g. Liquid Ooze). Always
-     * targets the drain move's user.
+     * Handles events due to an invertDrain ability (e.g. Liquid Ooze). Targets
+     * the drain move's user.
+     * @param accept Callback to accept this pathway.
      * @param side Ability holder reference.
      * @param hitByUserRef Pokemon reference to the user of the draining move.
+     * @returns `"invert"` if the drain damage was overridden to deduct instead
+     * of heal, otherwise `undefined`.
      */
-    private async invertDrain(ctx: BattleParserContext<"gen4">, side: SideID,
-        hitByUserRef: SideID): Promise<AbilityResult>
+    private async invertDrain(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID, hitByUserRef: SideID):
+        Promise<"invert" | undefined>
     {
-        await this.verifyInitialEvent(ctx, side);
-        // expect the takeDamage event
-        const damageResult = await parsers.damage(ctx, hitByUserRef,
-            /*from*/ null, -1);
-        if (!damageResult.success)
+        const mon = ctx.state.getTeam(hitByUserRef).active;
+        // TODO: expect actual drain damage amount?
+        if (isPercentDamageSilent(-1, mon.hp.current, mon.hp.max))
         {
-            throw new Error("On-moveDrain invert effect failed");
+            return;
         }
-        await parsers.update(ctx);
+        const event = await tryVerify(ctx, "|-damage|");
+        if (!event) return;
+        if (!verifyPercentDamage(ctx, event, hitByUserRef, -1)) return;
+        if (!this.isEventFromAbility(event)) return;
+        if (!event.kwArgs.of) return;
+        const identOf = Protocol.parsePokemonIdent(event.kwArgs.of);
+        if (identOf.player !== side) return;
+        accept();
+        await base["|-damage|"](ctx);
 
-        // TODO: include damage delta
-        return {invertDrain: true};
+        // also check for item updates since we caused damage
+        await updateItems(ctx);
+        // TODO: include damage delta?
+        return "invert";
     }
 
     //#endregion
@@ -1140,25 +1161,6 @@ export class Ability
         const type = this.data.on?.block?.move?.type;
         if (!type || type === "nonSuper") return null;
         return type;
-    }
-
-    //#endregion
-
-    //#endregion
-
-    //#region canX() SubReason builders for onX() activateAbility parsers
-
-    //#region on-moveDrain reason
-
-    /**
-     * Checks whether the ability can activate on-`moveDrain`.
-     * @returns A Set of SubReasons describing additional conditions of
-     * activation, or the empty set if there are none, or null if it cannot
-     * activate.
-     */
-    public canMoveDrain(): Set<SubReason> | null
-    {
-        return this.data.on?.moveDrain ? new Set() : null;
     }
 
     //#endregion
