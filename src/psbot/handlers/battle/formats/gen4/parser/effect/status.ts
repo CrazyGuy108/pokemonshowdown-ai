@@ -22,6 +22,8 @@ export interface StatusResult
 export type StatusEventType = "|-start|" | "|-status|" | "|-singlemove|" |
     "|-singleturn|" | "|-message|";
 
+// TODO: create a version with accept cb that can return undefined on error
+// TODO: create a version that throws on error, wrap aggregate errors in caller
 /**
  * Expects a status effect.
  * @param side Target pokemon reference.
@@ -52,6 +54,17 @@ export async function status(ctx: BattleParserContext<"gen4">, side: SideID,
 }
 
 /**
+ * Checks whether a status effect would be silent.
+ * @param mon Target pokemon.
+ * @param statusTypes Possible statuses to afflict.
+ */
+function isStatusSilent(mon: ReadonlyPokemon,
+    statusTypes: readonly dex.StatusType[]): boolean
+{
+    return statusTypes.every(s => cantStatus(mon, s));
+}
+
+/**
  * Verifies a status event.
  * @param event Event to verify.
  * @param side Pokemon reference that should receive the status.
@@ -79,17 +92,6 @@ function verifyStatus(
     const effect = Protocol.parseEffect(effectStr, toIdName);
     if (!statusTypes.includes(effect.name as dex.StatusType)) return;
     return effect.name as dex.StatusType;
-}
-
-/**
- * Checks whether a status effect would be silent.
- * @param mon Target pokemon.
- * @param statusTypes Possible statuses to afflict.
- */
-function isStatusSilent(mon: ReadonlyPokemon,
-    statusTypes: readonly dex.StatusType[]): boolean
-{
-    return statusTypes.every(s => cantStatus(mon, s));
 }
 
 // TODO: factor out status handlers for each status type?
@@ -124,6 +126,58 @@ function cantStatus(mon: ReadonlyPokemon, statusType: dex.StatusType): boolean
             // istanbul ignore next: should never happen
             throw new Error(`Invalid status effect '${statusType}'`);
     }
+}
+
+/**
+ * Event types that could contain information about ending/curing statuses.
+ * @see {@link cure}
+ */
+export type CureEventType = "|-end|" | "|-curestatus|";
+
+/**
+ * Expects a status cure effect.
+ * @param side Target pokemon reference.
+ * @param statusTypes Statuses to cure.
+ * @param pred Optional additional custom check on the event before it can be
+ * parsed. If it returns `false` then the event won't be parsed.
+ * @returns `"silent"` if no events needed to be consumed, otherwise a Set of
+ * the remaining StatusTypes that weren't parsed or elided due to not actually
+ * having the status.
+ */
+export async function cure(ctx: BattleParserContext<"gen4">, side: SideID,
+    statusTypes: readonly dex.StatusType[],
+    pred?: (event: Event<CureEventType>) => boolean):
+    Promise<"silent" | Set<dex.StatusType>>
+{
+    const mon = ctx.state.getTeam(side).active;
+    const res = new Set<dex.StatusType>();
+    for (const statusType of statusTypes)
+    {
+        if (!hasStatus(mon, statusType)) continue;
+        res.add(statusType);
+        // curing slp also cures nightmare if applicable
+        if (statusType === "slp" && hasStatus(mon, "nightmare"))
+        {
+            res.add("nightmare");
+        }
+    }
+    if (res.size <= 0) return "silent";
+
+    while (res.size > 0)
+    {
+        const event = await tryVerify(ctx, "|-end|", "|-curestatus|");
+        if (!event) break;
+        const [, identStr, effectStr] = event.args;
+        const ident = Protocol.parsePokemonIdent(identStr);
+        if (ident.player !== side) break;
+        const effect = Protocol.parseEffect(effectStr);
+        if (!res.has(effect.name as dex.StatusType)) break;
+        // TODO: also pass info that was parsed from the event?
+        if (pred && !pred(event)) break;
+        res.delete(effect.name as dex.StatusType);
+        await dispatch(ctx);
+    }
+    return res;
 }
 
 /** Checks whether the pokemon has the given status. */

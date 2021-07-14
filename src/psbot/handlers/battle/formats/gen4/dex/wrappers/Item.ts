@@ -6,10 +6,10 @@ import { Event } from "../../../../../../parser";
 import { BattleParserContext, consume, eventLoop, inference, tryPeek, tryVerify,
     unordered, verify } from "../../../../parser";
 import { dispatch, handlers as base } from "../../parser/base";
-import { boost } from "../../parser/effect/boost";
+import { boost, boostOne } from "../../parser/effect/boost";
 import { percentDamage } from "../../parser/effect/damage";
 import { updateItems } from "../../parser/effect/item";
-import { hasStatus, status, StatusEventType } from "../../parser/effect/status";
+import { cure, hasStatus, status, StatusEventType } from "../../parser/effect/status";
 import { chance, diffMoveType, hasAnItem, moveIsType } from
     "../../parser/reason";
 import { Pokemon, ReadonlyPokemon } from "../../state/Pokemon";
@@ -266,7 +266,7 @@ export class Item
 
     //#endregion
 
-    //#region consumeOn-postHit parser
+    //#region consumeOn-postHit
 
     /**
      * Activates an item on-`postHit` (e.g. jabocaberry/rowapberry).
@@ -298,7 +298,7 @@ export class Item
 
     //#endregion
 
-    //#region consumeOn-update parser
+    //#region consumeOn-update
 
     /**
      * Activates an item on-`update` (e.g. sitrusberry).
@@ -308,69 +308,103 @@ export class Item
     public async consumeOnUpdate(ctx: BattleParserContext<"gen4">,
         accept: unordered.AcceptCallback, side: SideID): Promise<void>
     {
-        const holder = ctx.state.getTeam(side).active;
         const data = this.data.consumeOn?.update;
         switch (data?.condition)
         {
             case "hp":
-                Item.assertHPThreshold(holder, data.threshold);
-                switch (data.effect.type)
-                {
-                    case "healPercent": case "healFixed":
-                    {
-                        await this.verifyConsume(ctx, side);
-                        await Item.heal(ctx, "update", side,
-                            data.effect.heal);
-                        if (data.effect.dislike)
-                        {
-                            // TODO: assert dislike nature
-                            await parsers.status(ctx, side, ["confusion"]);
-                        }
-                        return {};
-                    }
-                    case "boost":
-                    {
-                        await this.verifyConsume(ctx, side);
-                        const boostResult = await parsers.boostOne(ctx,
-                            side, data.effect.boostOne);
-                        if (!boostResult.success)
-                        {
-                            throw new Error("ConsumeOn-update boost effect " +
-                                "failed");
-                        }
-                        return {};
-                    }
-                    case "focusEnergy":
-                    {
-                        await this.verifyConsume(ctx, side);
-                        const statusResult = await parsers.status(ctx,
-                            side, ["focusEnergy"]);
-                        if (!statusResult.success)
-                        {
-                            throw new Error("ConsumeOn-update focusEnergy " +
-                                "effect failed");
-                        }
-                        return {};
-                    }
-                    default:
-                        // istanbul ignore next: should never happen
-                        throw new Error("ConsumeOn-update effect failed: " +
-                            `Unknown effect type '${data.effect!.type}'`);
-                }
+                return await this.updateHP(ctx, accept, side);
             case "status":
+                return await this.updateStatus(ctx, accept, side);
+            case "depleted":
+                return await this.updateDepleted(ctx, accept, side);
+        }
+    }
+
+    /**
+     * Activates an item on-`update` for condition=hp (e.g. sitrusberry).
+     * @param accept Callback to accept this pathway.
+     * @param side Item holder reference.
+     */
+    private async updateHP(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID): Promise<void>
+    {
+        const data = this.data.consumeOn?.update;
+        if (data?.condition !== "hp") return;
+        await this.consumeItem(ctx, accept, side);
+
+        const mon = ctx.state.getTeam(side).active;
+        Item.assertHPThreshold(mon, data.threshold);
+
+        const failName = `hp ${data.effect.type}`;
+        const fail = (reason?: string) => this.updateFailed(failName, reason);
+        switch (data.effect.type)
+        {
+            case "healPercent": case "healFixed":
             {
-                await this.verifyConsume(ctx, side);
-                // cure all the relevant statuses
-                const statusResult = await parsers.cure(ctx, side,
-                    Object.keys(data.cure) as dexutil.StatusType[]);
-                if (statusResult.ret !== true && statusResult.ret !== "silent")
+                let accepted = true;
+                const damageResult = await this.percentDamage(ctx,
+                    () => accepted = true, side, data.effect.heal);
+                if (damageResult !== true || !accepted) return fail();
+                if (data.effect.dislike)
                 {
-                    throw new Error("ConsumeOn-update cure effect failed");
+                    // TODO: assert dislike nature
+                    // TODO: handle status immunity/errors?
+                    await status(ctx, side, ["confusion"]);
                 }
                 break;
             }
-            case "depleted":
-                return await this.updateDepleted(ctx, accept, side);
+            case "boost":
+            {
+                // note: for starfberry (boosts a random stat), if all boosts
+                //  are maxed out, no events are emitted
+                const boostResult = await boostOne(ctx,
+                    {
+                        side, table: data.effect.boostOne,
+                        silent: Object.keys(data.effect.boostOne).length > 1
+                    },
+                    event => this.isEventFromItem(event));
+                if (!boostResult) return fail();
+                break;
+            }
+            case "focusEnergy":
+            {
+                // note: effect can be silent if already afflicted
+                const statusResult = await status(ctx, side, ["focusenergy"]);
+                if (!statusResult) return fail();
+                break;
+            }
+            // istanbul ignore next: should never happen
+            default:
+                const unhandled: never = data.effect;
+                throw new Error("ConsumeOn-update effect failed: " +
+                    `Unknown effect type '${(unhandled as any).type}'`);
+        }
+    }
+
+    /**
+     * Activates an item on-`update` for condition=status (e.g. lumberry).
+     * @param accept Callback to accept this pathway.
+     * @param side Item holder reference.
+     */
+    private async updateStatus(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID): Promise<void>
+    {
+        const data = this.data.consumeOn?.update;
+        if (data?.condition !== "status") return;
+        if (data.cure)
+        {
+            await this.consumeItem(ctx, accept, side);
+            const fail =
+                (reason?: string) => this.updateFailed("status cure", reason);
+            // cure all the relevant statuses
+            const cureResult = await cure(ctx, side,
+                Object.keys(data.cure) as StatusType[]);
+            if (cureResult === "silent") return fail("Cure effect was a no-op");
+            if (cureResult.size > 0)
+            {
+                return fail("Missing cure events: " +
+                    `[${[...cureResult].join(", ")}]`);
+            }
         }
     }
 

@@ -1,6 +1,7 @@
 /** @file Parsers and helper functions related to stat boost events. */
 import { Protocol } from "@pkmn/protocol";
 import { BoostID, SideID } from "@pkmn/types";
+import { Event } from "../../../../../../parser";
 import { BattleParserContext, eventLoop, tryVerify } from "../../../../parser";
 import { BoostTable } from "../../dex";
 import { dispatch, handlers as base } from "../base";
@@ -16,7 +17,7 @@ export interface BoostArgs
     /** Boosts to apply. */
     table: Partial<BoostTable<number>>;
     /** Whether to ignore boosts that can't be applied. Default false.  */
-    silent?: true;
+    silent?: boolean;
 }
 
 /**
@@ -37,7 +38,7 @@ export async function boost(ctx: BattleParserContext<"gen4">,
         {
             const event = await tryVerify(_ctx, "|-boost|", "|-unboost|");
             if (!event) return;
-            const [_, identStr, boostId, boostAmountStr] = event.args;
+            const [, identStr, boostId, boostAmountStr] = event.args;
             const ident = Protocol.parsePokemonIdent(identStr);
             if (ident.player !== args.side) return;
             if (!table.hasOwnProperty(boostId)) return;
@@ -97,7 +98,7 @@ export async function setBoost(ctx: BattleParserContext<"gen4">,
         {
             const event = await tryVerify(_ctx, "|-setboost|");
             if (!event) return;
-            const [_, identStr, boostId, boostAmountStr] = event.args;
+            const [, identStr, boostId, boostAmountStr] = event.args;
             const ident = Protocol.parsePokemonIdent(identStr);
             if (ident.player !== args.side) return;
             if (!table.hasOwnProperty(boostId)) return;
@@ -130,4 +131,55 @@ function consumeBoosts(table: Partial<Writable<BoostTable<number>>>,
             delete table[boostId as BoostID];
         }
     }
+}
+
+/**
+ * Parses a boost/unboost effect for one stat.
+ * @param accept Callback to accept this pathway. Called while parsing the first
+ * expected boost event.
+ * @param args Other required named arguments.
+ * @returns The boost that was parsed, or "silent" if no boosts could be
+ * applied if `args.silent=true`. Otherwise `undefined` if the next event is
+ * invalid.
+ */
+export async function boostOne(ctx: BattleParserContext<"gen4">,
+    args: BoostArgs,
+    pred?: (event: Event<"|-boost|" | "|-unboost|">) => boolean):
+    Promise<"silent" | BoostID | undefined>
+{
+    const mon = ctx.state.getTeam(args.side).active;
+    if (args.silent)
+    {
+        // verify that all the possible boosts were already maxed out
+        let allMaxed = true;
+        for (const possibleBoostId in args.table)
+        {
+            if (!args.table.hasOwnProperty(possibleBoostId)) continue;
+            if (!matchBoost(args.table[possibleBoostId as BoostID]!, 0,
+                    mon.volatile.boosts[possibleBoostId as BoostID]))
+            {
+                allMaxed = false;
+                break;
+            }
+        }
+        if (allMaxed) return "silent";
+    }
+
+    const event = await tryVerify(ctx, "|-boost|", "|-unboost|");
+    if (!event) return;
+    const [, identStr, boostId, boostAmountStr] = event.args;
+    const ident = Protocol.parsePokemonIdent(identStr);
+    if (ident.player !== args.side) return;
+    if (!args.table.hasOwnProperty(boostId)) return;
+    const boostAmount = Number(boostAmountStr);
+    if (!matchBoost(args.table[boostId]!, boostAmount,
+        mon.volatile.boosts[boostId]))
+    {
+        return;
+    }
+    if (pred && !pred(event)) return;
+    await dispatch(ctx);
+
+
+    return boostId;
 }

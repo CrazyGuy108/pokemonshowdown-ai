@@ -9,7 +9,8 @@ import { dispatch, handlers as base } from "../../parser/base";
 import { boost } from "../../parser/effect/boost";
 import { percentDamage } from "../../parser/effect/damage";
 import { updateItems } from "../../parser/effect/item";
-import { hasStatus, status, StatusEventType } from "../../parser/effect/status";
+import { cure, hasStatus, status, StatusEventType } from
+    "../../parser/effect/status";
 import { chance, diffMoveType, hasAnItem, moveIsType } from
     "../../parser/reason";
 import { Pokemon, ReadonlyPokemon } from "../../state/Pokemon";
@@ -1111,36 +1112,21 @@ export class Ability
         if (initialEffect.type !== "ability") return;
         if (initialEffect.name !== this.data.name) return;
         accept();
-        await base["|-activate|"](ctx);
+        await consume(ctx);
 
         // parse cure events
-        await eventLoop(ctx, async function cureImmunityLoop(_ctx)
+        const cureResult = await cure(ctx, side,
+            Object.keys(immunities) as StatusType[]);
+        if (cureResult === "silent")
         {
-            const event = await tryPeek(_ctx);
-            if (!event) return;
-            switch (event.args[0])
-            {
-                case "-end":
-                {
-                    const [, identStr, effectStr] = event.args;
-                    const ident = Protocol.parsePokemonIdent(identStr);
-                    if (ident.player !== side) break;
-                    const effect = Protocol.parseEffect(effectStr, toIdName);
-                    if (immunities[effect.name as StatusType] !== true) break;
-                    await base["|-end|"](_ctx);
-                    break;
-                }
-                case "-curestatus":
-                {
-                    const [, identStr, majorStatusType] = event.args;
-                    const ident = Protocol.parsePokemonIdent(identStr);
-                    if (ident.player !== side) break;
-                    if (immunities[majorStatusType] !== true) break;
-                    await base["|-curestatus|"](_ctx);
-                    break;
-                }
-            }
-        });
+            throw new Error("On-status cure effect failed: " +
+                "Cure effect was a no-op");
+        }
+        if (cureResult.size > 0)
+        {
+            throw new Error("On-status cure effect failed: " +
+                `Missing cure events: [${[...cureResult].join(", ")}]`);
+        }
     }
 
     /** Gets the ability's move type immunity, or null if none found. */
