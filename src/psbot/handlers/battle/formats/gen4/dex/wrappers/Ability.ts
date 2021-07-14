@@ -42,7 +42,7 @@ export class Ability
      */
     constructor(public readonly data: AbilityData) {}
 
-    //#region canX() SubInference builders and onX() ability effect parsers
+    //#region canX() SubReasons and onX() ability effect parsers
 
     //#region on-switchOut
 
@@ -648,12 +648,10 @@ export class Ability
     {
         // TODO: assert non-ignoreTargetAbility (moldbreaker) after handling if
         //  this is due to a move effect
-        if (this.data.on?.tryUnboost)
+        if (!this.data.on?.tryUnboost) return {};
+        if (this.data.on.tryUnboost.block)
         {
-            if (this.data.on.tryUnboost.block)
-            {
-                return await this.blockUnboost(ctx, accept, side);
-            }
+            return await this.blockUnboost(ctx, accept, side);
         }
         return {};
     }
@@ -714,13 +712,11 @@ export class Ability
     public async onStatus(ctx: BattleParserContext<"gen4">,
         accept: unordered.AcceptCallback, side: SideID): Promise<void>
     {
-        if (this.data.on?.status)
+        if (!this.data.on?.status) return;
+        // cure status immunity
+        if (this.data.on.status.cure)
         {
-            // cure status immunity
-            if (this.data.on.status.cure)
-            {
-                return await this.cureImmunity(ctx, accept, side);
-            }
+            return await this.cureImmunity(ctx, accept, side);
         }
     }
 
@@ -778,24 +774,25 @@ export class Ability
         accept: unordered.AcceptCallback, on: AbilityOn, side: SideID,
         hitBy: MoveAndUserRef): Promise<void>
     {
+        if (!this.data.on) return;
         switch (on)
         {
             case "moveContactKO":
-                if (this.data.on?.moveContactKO)
+                if (this.data.on.moveContactKO)
                 {
                     return await this.moveContactKO(ctx, accept, side,
                         hitBy.userRef);
                 }
                 // fallthrough: contactKO also applies to contact in general
             case "moveContact":
-                if (this.data.on?.moveContact)
+                if (this.data.on.moveContact)
                 {
                     return await this.moveContact(ctx, accept, side,
                         hitBy.userRef);
                 }
                 // fallthrough: contact also applies to damage in general
             case "moveDamage":
-                if (this.data.on?.moveDamage)
+                if (this.data.on.moveDamage)
                 {
                     // colorchange
                     if (this.data.on.moveDamage.changeToMoveType &&
@@ -938,13 +935,11 @@ export class Ability
         accept: unordered.AcceptCallback, side: SideID, hitByUserRef: SideID):
         Promise<"invert" | undefined>
     {
-        if (this.data.on?.moveDrain)
+        if (!this.data.on?.moveDrain) return;
+        // invert drain effect to damage instead of heal
+        if (this.data.on.moveDrain.invert)
         {
-            // invert drain effect to damage instead of heal
-            if (this.data.on.moveDrain.invert)
-            {
-                return await this.invertDrain(ctx, accept, side, hitByUserRef);
-            }
+            return await this.invertDrain(ctx, accept, side, hitByUserRef);
         }
     }
 

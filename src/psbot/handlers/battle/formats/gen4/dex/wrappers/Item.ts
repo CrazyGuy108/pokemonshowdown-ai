@@ -1,301 +1,267 @@
-import { SubParserConfig, SubParserResult } from "../../../../../../../battle/parser/BattleParser";
-import { ItemResult } from "../../parser/activateItem";
-import { handlers as base } from "../../parser/base";
-import { SubReason } from "../../parser/EventInference";
-import { cantHaveKlutz, checkKlutz, hasAbility, isAt1HP, moveIsType } from
-    "../../parser/helpers";
-import * as parsers from "../../parser/parsers";
-import { ItemConsumeResult } from "../../parser/removeItem";
-import { consume, hasStatus, matchPercentDamage, tryPeek, verify } from
-    "../../../../../../../battle/parser/helpers";
-import { Pokemon } from "../../state/Pokemon";
-import { Side } from "../../state/Side";
-import * as dexutil from "../dex-util";
-import { getAttackerTypes, getTypeEffectiveness } from "../typechart";
+import { Protocol } from "@pkmn/protocol";
+import { BoostID, SideID } from "@pkmn/types";
+import { Type, WeatherType } from "..";
+import { toIdName } from "../../../../../../helpers";
+import { Event } from "../../../../../../parser";
+import { BattleParserContext, consume, eventLoop, inference, tryPeek, tryVerify,
+    unordered, verify } from "../../../../parser";
+import { dispatch, handlers as base } from "../../parser/base";
+import { boost } from "../../parser/effect/boost";
+import { percentDamage } from "../../parser/effect/damage";
+import { updateItems } from "../../parser/effect/item";
+import { hasStatus, status, StatusEventType } from "../../parser/effect/status";
+import { chance, diffMoveType, hasAnItem, moveIsType } from
+    "../../parser/reason";
+import { Pokemon, ReadonlyPokemon } from "../../state/Pokemon";
+import { getMove } from "../dex";
+import { BoostTable, ItemData, ItemOn, StatusType } from "../dex-util";
+import { getTypeEffectiveness } from "../typechart";
+import { Move, MoveAndUser, MoveAndUserRef } from "./Move";
+
+/** Result of `Item#consumeOnPreHit()`. */
+export interface ItemConsumePreHitResult
+{
+    /** Resist berry type if applicable. */
+    resistSuper?: Type;
+}
 
 /** Encapsulates item properties. */
 export class Item
 {
-    // TODO: eventually make #data inaccessible apart from internal dex
+    // TODO: eventually make #data inaccessible apart from internal dex?
     /**
      * Creates an Item data wrapper.
      * @param data Item data from dex.
      */
-    constructor(public readonly data: dexutil.ItemData) {}
+    constructor(public readonly data: ItemData) {}
 
-    //#region onX() effect parsers for main activateItem parser
+    //#region canX() SubReasons and onX() item effect parsers
 
-    // note: each of these parsers assumes that the initial activateItem event
-    //  hasn't been consumed/verified yet
-
-    //#region on-movePostDamage parser
+    //#region on-movePostDamage
 
     /**
      * Activates an item on-`movePostDamage` (e.g. lifeorb).
-     * @param holderRef Item holder reference.
+     * @param accept Callback to accept this pathway.
+     * @param side Item holder reference.
      */
-    public async onMovePostDamage(cfg: SubParserConfig, holderRef: Side):
-        Promise<ItemResult>
+    public async onMovePostDamage(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID): Promise<void>
     {
-        if (this.data.on?.movePostDamage)
+        if (!this.data.on?.movePostDamage) return;
+        // self-damage
+        if (this.data.on.movePostDamage.percentDamage)
         {
-            // self-damage
-            if (this.data.on.movePostDamage.percentDamage)
-            {
-                this.indirectDamage(cfg, holderRef);
-                await this.verifyActivate(cfg, holderRef);
-
-                const damageResult = await parsers.percentDamage(cfg, holderRef,
-                        this.data.on.movePostDamage.percentDamage);
-                if (damageResult.success === true)
-                {
-                    await parsers.update(cfg);
-                    return {};
-                }
-                throw new Error("On-movePostDamage percentDamage effect " +
-                    "failed");
-            }
+            const damageResult = await this.percentDamage(ctx, accept, side,
+                this.data.on.movePostDamage.percentDamage);
+            if (damageResult !== true) return;
+            // this counts as indirect damage (blocked by magicguard)
+            // TODO: make this a SubReason in #canMovePostDamage()
+            this.indirectDamage(ctx, side);
         }
-        throw new Error("On-movePostDamage effect shouldn't activate for " +
-            `item '${this.data.name}'`);
     }
 
     //#endregion
 
-    //#region on-turn parser
+    //#region on-turn
 
     /**
      * Handles events due to a turn item (e.g. leftovers).
-     * @param holderRef Item holder reference.
+     * @param accept Callback to accept this pathway.
+     * @param side Item holder reference.
      */
-    public async onTurn(cfg: SubParserConfig, holderRef: Side):
-        Promise<ItemResult>
+    public async onTurn(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID): Promise<void>
     {
-        const holder = cfg.state.teams[holderRef].active;
-        if (this.data.on?.turn)
+        if (!this.data.on?.turn) return;
+        // self-damage from leftovers, blacksludge, etc
+        const holder = ctx.state.getTeam(side).active;
+        const isPoison = holder.types.includes("poison");
+        const percent =
+            this.data.on.turn[isPoison ? "poisonDamage" : "noPoisonDamage"];
+        if (percent)
         {
-            await this.verifyActivate(cfg, holderRef);
-            let allSilent = true;
-
-            // leftovers, blacksludge, etc
-            const isPoison = holder.types.includes("poison");
-            const percentDamage =
-                this.data.on.turn[isPoison ? "poisonDamage" : "noPoisonDamage"];
-            if (percentDamage)
-            {
-                const damageResult = await parsers.percentDamage(cfg, holderRef,
-                        percentDamage);
-                if (damageResult.success === true)
-                {
-                    this.indirectDamage(cfg, holderRef);
-                    allSilent = false;
-                }
-            }
-
-            // toxicorb, etc
-            if (this.data.on.turn.status)
-            {
-                const statusResult = await parsers.status(cfg, holderRef,
-                        [this.data.on.turn.status]);
-                if (statusResult.success === this.data.on.turn.status)
-                {
-                    allSilent = false;
-                }
-            }
-
-            if (!allSilent) return {};
+            const damageResult = await this.percentDamage(ctx, accept, side,
+                    percent);
+            if (damageResult !== true) return;
+            this.indirectDamage(ctx, side);
         }
-        throw new Error("On-turn effect shouldn't activate for item " +
-            `'${this.data.name}'`);
-    }
-
-    //#endregion
-
-    //#region onX() method helpers
-
-    /**
-     * Verifies and consumes the initial activateItem event to verify that it
-     * may be relevant for this Item obj.
-     * @param holderRef Item holder reference.
-     */
-    private async verifyActivate(cfg: SubParserConfig, holderRef: Side):
-        Promise<void>
-    {
-        const event = await verify(cfg, "activateItem");
-        if (event.monRef !== holderRef)
+        // self-status from toxicorb, flameorb, etc
+        else if (this.data.on.turn.status)
         {
-            throw new Error(`Mismatched monRef: expected '${holderRef}' but ` +
-                `got '${event.monRef}'`);
+            await this.status(ctx, accept, side,
+                [this.data.on.turn.status]);
         }
-        if (event.item !== this.data.name)
-        {
-            throw new Error("Mismatched item: expected " +
-                `'${this.data.name}' but got '${event.item}'`);
-        }
-        await consume(cfg);
-    }
-
-    /**
-     * Indicates that the item holder received indirect damage from the item, in
-     * order to make ability inferences.
-     */
-    private indirectDamage(cfg: SubParserConfig, holderRef: Side): void
-    {
-        const holder = cfg.state.teams[holderRef].active;
-        if (holder.volatile.suppressAbility) return;
-
-        // can't have an ability that blocks indirect damage
-        const ability = holder.traits.ability;
-        const filteredAbilities =
-            [...ability.possibleValues]
-                .filter(n => ability.map[n].flags?.noIndirectDamage === true);
-        if (filteredAbilities.length >= ability.size)
-        {
-            throw new Error(`Pokemon '${holderRef}' received indirect damage ` +
-                `from item '${this.data.name}' even though its ability ` +
-                `[${[...ability.possibleValues].join(", ")}] suppresses that ` +
-                "damage");
-        }
-        ability.remove(filteredAbilities);
     }
 
     //#endregion
 
     //#endregion
 
-    //#region consumeOnX() effect parsers for main removeItem parser
+    //#region canConsumeX() SubReasons and onConsumeX() item effect parsers
 
-    //#region consumeOn-preMove parser
+    //#region consumeOn-preMove
 
+    // TODO: custap hp check happens on pre-turn
     /**
      * Activates an item on-`preMove` (e.g. custapberry).
-     * @param holderRef Item holder reference.
+     * @param accept Callback to accept this pathway.
+     * @param side Item holder reference.
+     * @returns `"moveFirst"` if the holder is moving first in its priority
+     * bracket due to the item. Otherwise `undefined`.
      */
-    public async consumeOnPreMove(cfg: SubParserConfig, holderRef: Side):
-        Promise<ItemConsumeResult>
+    public async consumeOnPreMove(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID):
+        Promise<"moveFirst" | undefined>
     {
-        if (this.data.consumeOn?.preMove)
+        if (!this.data.consumeOn?.preMove) return;
+        if (this.data.consumeOn.preMove.moveFirst &&
+            this.data.consumeOn.preMove.threshold)
         {
-            if (this.data.consumeOn.preMove.moveFirst &&
-                this.data.consumeOn.preMove.threshold)
-            {
-                const holder = cfg.state.teams[holderRef].active;
-                Item.assertHPThreshold(holder,
-                    this.data.consumeOn.preMove.threshold);
-                await this.verifyConsume(cfg, holderRef);
-                return {moveFirst: true};
-            }
+            if (!await this.consumeItem(ctx, accept, side)) return;
+
+            const holder = ctx.state.getTeam(side).active;
+            Item.assertHPThreshold(holder,
+                this.data.consumeOn.preMove.threshold);
+            return "moveFirst";
         }
-        throw new Error(`ConsumeOn-preMove effect shouldn't activate for ` +
-            `item '${this.data.name}'`);
     }
 
     //#endregion
 
-    //#region consumeOn-moveCharge parser
+    //#region consumeOn-moveCharge
 
     /**
      * Activates an item on-`moveCharge` (e.g. powerherb).
-     * @param holderRef Item holder reference.
+     * @param accept Callback to accept this pathway.
+     * @param side Item holder reference.
+     * @returns `"shorten"` if the holder's two-turn move is being shortend to
+     * one due to the item. Otherwise `undefined`.
      */
-    public async consumeOnMoveCharge(cfg: SubParserConfig, holderRef: Side):
-        Promise<ItemConsumeResult>
+    public async consumeOnMoveCharge(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID):
+        Promise<"shorten" | undefined>
     {
-        if (this.data.consumeOn?.moveCharge)
+        if (!this.data.consumeOn?.moveCharge) return;
+        if (this.data.consumeOn.moveCharge === "shorten")
         {
-            if (this.data.consumeOn.moveCharge === "shorten")
-            {
-                await this.verifyConsume(cfg, holderRef);
-                return {shorten: true};
-            }
+            if (!await this.consumeItem(ctx, accept, side)) return;
+            return "shorten";
         }
-        throw new Error(`ConsumeOn-moveCharge effect shouldn't activate for ` +
-            `item '${this.data.name}'`);
     }
 
     //#endregion
 
-    //#region consumeOn-preHit parser
+    //#region consumeOn-preHit
 
     /**
      * Activates an item on-`preHit` (e.g. resist berries).
-     * @param holderRef Item holder reference.
+     * @param accept Callback to accept this pathway.
+     * @param side Item holder reference.
      * @param hitBy Move+user the holder is being hit by.
      */
-    public async consumeOnPreHit(cfg: SubParserConfig, holderRef: Side,
-        hitBy: dexutil.MoveAndUser): Promise<ItemConsumeResult>
+    public async consumeOnPreHit(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID, hitBy: MoveAndUser):
+        Promise<ItemConsumePreHitResult>
     {
-        const holder = cfg.state.teams[holderRef].active;
-        if (this.data.consumeOn?.preHit)
+        if (!this.data.consumeOn?.preHit) return {};
+        if (this.data.consumeOn.preHit.resistSuper)
         {
-            const {resistSuper} = this.data.consumeOn.preHit;
-            if (resistSuper)
-            {
-                // assert that the holder is weak to this type
-                const {types} = holder;
-                const eff = getTypeEffectiveness(types, resistSuper);
-                if (eff !== "super")
-                {
-                    // TODO: log error instead of throwing?
-                    throw new Error("Expected type effectiveness to be " +
-                        `'super' but got '${eff}' for '${resistSuper}' vs ` +
-                        `[${types.join(", ")}]`);
-                }
-
-                // infer move type based on resist berry type
-                hitBy.move.assertType(resistSuper, hitBy.user);
-                await this.verifyConsume(cfg, holderRef);
-                return {resistSuper};
-            }
+            return await this.resistSuper(ctx, accept, side, hitBy,
+                this.data.consumeOn.preHit.resistSuper);
         }
-        throw new Error(`ConsumeOn-preHit effect shouldn't activate for ` +
-            `item '${this.data.name}'`);
+        return {};
+    }
+
+    /**
+     * Activates a resist berry item.
+     * @param accept Callback to accept this pathway.
+     * @param side Item holder reference.
+     * @param hitBy Move+user the holder is being hit by.
+     * @param moveType Resist berry type, which must match the `hitBy.move`
+     * type.
+     */
+    private async resistSuper(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID, hitBy: MoveAndUser,
+        moveType: Type): Promise<ItemConsumePreHitResult>
+    {
+        if (!await this.consumeItem(ctx, accept, side)) return {};
+
+        // item effect is similar to the initial parsed consumeItem()
+        //  event but with a [weaken] suffix instead of [eat]
+        const event = await tryVerify(ctx, "|-enditem|");
+        if (!event) return {};
+        const [, identStr, itemName] = event.args;
+        const ident = Protocol.parsePokemonIdent(identStr);
+        if (ident.player !== side) return {};
+        const itemId = toIdName(itemName);
+        if (itemId !== this.data.name) return {};
+        if (!event.kwArgs.weaken) return {};
+        accept();
+        // since this is sort of like a duplicate |-enditem| event we should
+        //  just consume it here rather than try to handle it a second time
+        await consume(ctx);
+
+        // assert that the holder is weak to this type
+        const holder = ctx.state.getTeam(side).active;
+        const {types} = holder;
+        const eff = getTypeEffectiveness(types, moveType);
+        if (eff !== "super")
+        {
+            // TODO: log error instead of throw?
+            throw new Error("Expected type effectiveness to be 'super' but " +
+                `got '${eff}' for '${moveType}' vs [${types.join(", ")}]`);
+        }
+
+        // infer move type based on resist berry type
+        hitBy.move.assertType(moveType, hitBy.user);
+        return {resistSuper: moveType};
     }
 
     //#endregion
 
-    //#region consumeOn-tryOHKO parser
+    //#region consumeOn-tryOHKO
 
     /**
      * Activates an item on-`tryOHKO` (e.g. focussash).
-     * @param holderRef Item holder reference.
+     * @param accept Callback to accept this pathway.
+     * @param side Item holder reference.
      */
-    public async consumeOnTryOHKO(cfg: SubParserConfig, holderRef: Side):
-        Promise<ItemConsumeResult>
+    public async consumeOnTryOHKO(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID): Promise<void>
     {
         const tryOHKO = this.data.consumeOn?.tryOHKO;
-        if (tryOHKO)
+        if (!tryOHKO) return;
+        if (tryOHKO === "block")
         {
-            if (tryOHKO === "block")
-            {
-                await this.verifyConsume(cfg, holderRef);
-                return {};
-            }
+            await this.consumeItem(ctx, accept, side);
         }
-        throw new Error(`ConsumeOn-tryOHKO effect shouldn't activate for ` +
-            `item '${this.data.name}'`);
     }
 
     //#endregion
 
-    //#region consumeOn-super parser
+    //#region consumeOn-super
 
     /**
      * Activates an item on-`super` (e.g. enigmaberry).
-     * @param holderRef Item holder reference.
+     * @param accept Callback to accept this pathway.
+     * @param side Item holder reference.
      */
-    public async consumeOnSuper(cfg: SubParserConfig, holderRef: Side):
-        Promise<ItemConsumeResult>
+    public async consumeOnSuper(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID): Promise<void>
     {
-        if (this.data.consumeOn?.super)
+        if (!this.data.consumeOn?.super) return;
+        // TODO: assert type effectiveness from hitby-move?
+        if (this.data.consumeOn.super.heal)
         {
-            await this.verifyConsume(cfg, holderRef);
-            const {heal} = this.data.consumeOn.super;
-            // TODO: assert type effectiveness from hitby-move?
-            if (heal) return await Item.heal(cfg, "super", holderRef, heal);
+            await this.consumeItem(ctx, accept, side);
+            let accepted = false;
+            const damageResult = await this.percentDamage(ctx,
+                () => accepted = true, side, this.data.consumeOn.super.heal);
+            if (damageResult !== true || !accepted)
+            {
+                throw new Error("ConsumeOn-super heal effect failed");
+            }
         }
-        throw new Error(`ConsumeOn-super effect shouldn't activate for ` +
-            `item '${this.data.name}'`);
     }
 
     //#endregion
@@ -304,40 +270,30 @@ export class Item
 
     /**
      * Activates an item on-`postHit` (e.g. jabocaberry/rowapberry).
-     * @param holderRef Item holder reference.
+     * @param accept Callback to accept this pathway.
+     * @param side Item holder reference.
      * @param hitBy Move+user the holder is being hit by.
      */
-    public async consumeOnPostHit(cfg: SubParserConfig, holderRef: Side,
-        hitBy: dexutil.MoveAndUserRef): Promise<ItemConsumeResult>
+    public async consumeOnPostHit(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID, hitBy: MoveAndUserRef):
+        Promise<void>
     {
-        if (this.data.consumeOn?.postHit)
+        if (!this.data.consumeOn?.postHit) return;
+        const {condition, damage} = this.data.consumeOn.postHit;
+        if (hitBy.move.data.category !== condition) return;
+        if (damage)
         {
-            const {condition, damage} = this.data.consumeOn.postHit;
-            if (hitBy.move.data.category !== condition)
+            await this.consumeItem(ctx, accept, side);
+            let accepted = false;
+            const damageResult = await this.percentDamage(ctx,
+                () => accepted = true, hitBy.userRef, -damage);
+            if (damageResult !== true || !accepted)
             {
-                throw new Error("Mismatched move category: expected " +
-                    `'${condition}' but got '${hitBy.move.data.category}'`);
+                throw new Error("ConsumeOn-postHit damage effect failed");
             }
-            if (damage)
-            {
-                await this.verifyConsume(cfg, holderRef);
-                const damageResult = await parsers.percentDamage(cfg,
-                    hitBy.userRef, -damage);
-                if (!damageResult.success)
-                {
-                    throw new Error("ConsumeOn-postHit damage effect failed");
-                }
-                if (damageResult.success === true)
-                {
-                    // after taking damage, check if any other items need to
-                    //  activate
-                    await parsers.update(cfg);
-                }
-                return {};
-            }
+            // after taking damage, check if any other items need to activate
+            await updateItems(ctx);
         }
-        throw new Error(`ConsumeOn-postHit effect shouldn't activate for ` +
-            `item '${this.data.name}'`);
     }
 
     //#endregion
@@ -346,12 +302,13 @@ export class Item
 
     /**
      * Activates an item on-`update` (e.g. sitrusberry).
-     * @param holderRef Item holder reference.
+     * @param accept Callback to accept this pathway.
+     * @param side Item holder reference.
      */
-    public async consumeOnUpdate(cfg: SubParserConfig, holderRef: Side):
-        Promise<ItemConsumeResult>
+    public async consumeOnUpdate(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID): Promise<void>
     {
-        const holder = cfg.state.teams[holderRef].active;
+        const holder = ctx.state.getTeam(side).active;
         const data = this.data.consumeOn?.update;
         switch (data?.condition)
         {
@@ -361,21 +318,21 @@ export class Item
                 {
                     case "healPercent": case "healFixed":
                     {
-                        await this.verifyConsume(cfg, holderRef);
-                        await Item.heal(cfg, "update", holderRef,
+                        await this.verifyConsume(ctx, side);
+                        await Item.heal(ctx, "update", side,
                             data.effect.heal);
                         if (data.effect.dislike)
                         {
                             // TODO: assert dislike nature
-                            await parsers.status(cfg, holderRef, ["confusion"]);
+                            await parsers.status(ctx, side, ["confusion"]);
                         }
                         return {};
                     }
                     case "boost":
                     {
-                        await this.verifyConsume(cfg, holderRef);
-                        const boostResult = await parsers.boostOne(cfg,
-                            holderRef, data.effect.boostOne);
+                        await this.verifyConsume(ctx, side);
+                        const boostResult = await parsers.boostOne(ctx,
+                            side, data.effect.boostOne);
                         if (!boostResult.success)
                         {
                             throw new Error("ConsumeOn-update boost effect " +
@@ -385,9 +342,9 @@ export class Item
                     }
                     case "focusEnergy":
                     {
-                        await this.verifyConsume(cfg, holderRef);
-                        const statusResult = await parsers.status(cfg,
-                            holderRef, ["focusEnergy"]);
+                        await this.verifyConsume(ctx, side);
+                        const statusResult = await parsers.status(ctx,
+                            side, ["focusEnergy"]);
                         if (!statusResult.success)
                         {
                             throw new Error("ConsumeOn-update focusEnergy " +
@@ -402,33 +359,97 @@ export class Item
                 }
             case "status":
             {
-                await this.verifyConsume(cfg, holderRef);
+                await this.verifyConsume(ctx, side);
                 // cure all the relevant statuses
-                const statusResult = await parsers.cure(cfg, holderRef,
+                const statusResult = await parsers.cure(ctx, side,
                     Object.keys(data.cure) as dexutil.StatusType[]);
                 if (statusResult.ret !== true && statusResult.ret !== "silent")
                 {
                     throw new Error("ConsumeOn-update cure effect failed");
                 }
-                return {};
+                break;
             }
             case "depleted":
-            {
-                await this.verifyConsume(cfg, holderRef);
-                // restore pp
-                const event = await tryPeek(cfg);
-                if (event?.type !== "modifyPP" || event.monRef !== holderRef ||
-                    event.amount !== data.restore)
-                {
-                    throw new Error("ConsumeOn-update restore effect failed");
-                }
-                await base.modifyPP(cfg);
-                return {};
-            }
+                return await this.updateDepleted(ctx, accept, side);
         }
-        // istanbul ignore next: should never happen
-        throw new Error(`ConsumeOn-update effect shouldn't activate for ` +
-            `item '${this.data.name}'`);
+    }
+
+    /**
+     * Activates an item on-`update` for condition=depleted (e.g. leppaberry).
+     * @param accept Callback to accept this pathway.
+     * @param side Item holder reference.
+     */
+    private async updateDepleted(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID): Promise<void>
+    {
+        const data = this.data.consumeOn?.update;
+        if (data?.condition !== "depleted") return;
+        if (data.restore)
+        {
+            await this.consumeItem(ctx, accept, side);
+            const fail =
+                (reason?: string) =>
+                    this.updateFailed("depleted restore", reason);
+
+            const event = await tryVerify(ctx, "|-activate|");
+            if (!event) return fail("Missing |-activate| event");
+            const [, identStr, effectStr, moveName] = event.args;
+            Item.requireIdent(identStr, side, fail);
+            this.requireEffectFromItem(effectStr, fail);
+            Item.requireString(moveName, "move", fail);
+            const moveId = toIdName(moveName);
+            accept();
+
+            const holder = ctx.state.getTeam(side).active;
+            holder.moveset.reveal(moveId).pp += data.restore;
+            await consume(ctx);
+        }
+    }
+
+    // TODO: replace fail cb with aggregate errors
+    private static requireIdent(str?: string, side?: SideID,
+        fail?: (reason: string) => never):
+        ReturnType<typeof Protocol["parsePokemonIdent"]>
+    {
+        fail ??= reason => { throw new Error(reason); };
+        Item.requireString(str, "ident", fail);
+        const ident = Protocol.parsePokemonIdent(str as Protocol.PokemonIdent);
+        if (side && ident.player !== side)
+        {
+            return fail(`Expected ident '${side}' but got '${ident.player}'`);
+        }
+        return ident;
+    }
+
+    private requireEffectFromItem(str?: string,
+        fail?: (reason: string) => never):
+        ReturnType<typeof Protocol["parseEffect"]>
+    {
+        fail ??= reason => { throw new Error(reason); };
+        if (!str) return fail("Missing effect");
+        const effect = Protocol.parseEffect(str, toIdName);
+        if (!this.isEffectFromItem(effect))
+        {
+            return fail(
+                `Expected item '${this.data.name}' but got '${effect?.name}'`);
+        }
+        return effect;
+    }
+
+    private static requireString(str?: string, name?: string,
+        fail?: (reason: string) => never): asserts str is string
+    {
+        if (str) return;
+        fail ??= reason => { throw new Error(reason); };
+        name ??= "string";
+        return fail(`Missing ${name}`);
+    }
+
+    private updateFailed(effectName: string, reason?: string): never
+    {
+        let s = `ConsumeOn-update ${effectName} effect failed`;
+        if (reason) s += ": " + reason;
+        throw new Error(s);
     }
 
     //#endregion
@@ -437,20 +458,20 @@ export class Item
 
     /**
      * Activates an item on-`residual` (e.g. micleberry).
-     * @param holderRef Item holder reference.
+     * @param side Item holder reference.
      */
-    public async consumeOnResidual(cfg: SubParserConfig, holderRef: Side):
+    public async consumeOnResidual(ctx: BattleParserContext<"gen4">, side: SideID):
         Promise<ItemConsumeResult>
     {
         if (this.data.consumeOn?.residual)
         {
-            const holder = cfg.state.teams[holderRef].active;
+            const holder = ctx.state.teams[side].active;
             Item.assertHPThreshold(holder,
                 this.data.consumeOn.residual.threshold);
             if (this.data.consumeOn.residual.status === "micleberry")
             {
                 holder.volatile.micleberry = true;
-                await this.verifyConsume(cfg, holderRef);
+                await this.verifyConsume(ctx, side);
                 return {};
             }
         }
@@ -465,15 +486,15 @@ export class Item
     /**
      * Verifies and consumes the initial activateItem event to verify that it
      * may be relevant for this Item obj.
-     * @param holderRef Item holder reference.
+     * @param side Item holder reference.
      */
-    private async verifyConsume(cfg: SubParserConfig, holderRef: Side):
+    private async verifyConsume(ctx: BattleParserContext<"gen4">, side: SideID):
         Promise<void>
     {
-        const event = await verify(cfg, "removeItem");
-        if (event.monRef !== holderRef)
+        const event = await verify(ctx, "removeItem");
+        if (event.monRef !== side)
         {
-            throw new Error(`Mismatched monRef: expected '${holderRef}' but ` +
+            throw new Error(`Mismatched monRef: expected '${side}' but ` +
                 `got '${event.monRef}'`);
         }
         if (event.consumed !== this.data.name)
@@ -481,7 +502,7 @@ export class Item
             throw new Error("Mismatched item: expected " +
                 `'${this.data.name}' but got '${event.consumed}'`);
         }
-        await consume(cfg);
+        await consume(ctx);
     }
 
     /** Makes HP/ability assertions based on item activation HP threshold. */
@@ -505,10 +526,10 @@ export class Item
     }
 
     /** Handles heal effect from items. */
-    private static async heal(cfg: SubParserConfig, on: dexutil.ItemConsumeOn,
-        holderRef: Side, percent: number): Promise<SubParserResult>
+    private static async heal(ctx: BattleParserContext<"gen4">, on: dexutil.ItemConsumeOn,
+        side: SideID, percent: number): Promise<SubParserResult>
     {
-        const healResult = await parsers.percentDamage(cfg, holderRef,
+        const healResult = await parsers.percentDamage(ctx, side,
             percent);
         if (!healResult.success)
         {
@@ -796,7 +817,37 @@ export class Item
 
     //#endregion
 
-    //#region canConsumeX() method helpers
+    //#region consumeOn-x helper methods
+
+    /**
+     * Expects the initial `|-enditem|<holder>|<item>` event for consuming an
+     * Item.
+     * @param accept Callback to accept this pathway.
+     * @param side Item holder reference.
+     * @returns `true` if parsed, `undefined` otherwise.
+     */
+    private async consumeItem(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID):
+        Promise<true | undefined>
+    {
+        const event = await tryVerify(ctx, "|-enditem|");
+        if (!event) return;
+        const [, identStr, itemName] = event.args;
+        const ident = Protocol.parsePokemonIdent(identStr);
+        if (ident.player !== side) return;
+        const itemId = toIdName(itemName);
+        if (itemId !== this.data.name) return;
+        // berries have to be explicitly eaten to gain their effect
+        if (this.data.isBerry && !event.kwArgs.eat) return;
+        // this event is caused by resistSuper berries but only after the
+        //  current initial [eat] event that we're parsing
+        if (event.kwArgs.weaken) return;
+        // differentiate from item-removal/stealeat move effects
+        if (event.kwArgs.from || event.kwArgs.move || event.kwArgs.of) return;
+        accept();
+        await base["|-enditem|"](ctx);
+        return true;
+    }
 
     /**
      * Checks whether the described HP threshold item can activate for the
@@ -808,7 +859,7 @@ export class Item
      * activate.
      */
     private checkHPThreshold(mon: Pokemon, threshold: number):
-        Set<SubReason> | null
+        Set<inference.SubReason> | null
     {
         // TODO: is percentHP reliable? how does PS/cart handle rounding?
         const percentHP = 100 * mon.hp.current / mon.hp.max;
@@ -849,6 +900,118 @@ export class Item
     }
 
     //#endregion
+
+    //#endregion
+
+    //#region on-x/consumeOn-x helper methods
+
+    /**
+     * Expects an event for a percent-damage effect with the correct `[from]`
+     * suffix.
+     * @param accept Callback to accept this pathway.
+     * @param side Pokemon reference receiving the damage.
+     * @param percent Percent damage to deal.
+     * @param of Pokemon that should be referenced by the event's `[of]` suffix.
+     * Optional.
+     * @returns `true` if the effect was parsed, `"silent"` if the effect is a
+     * no-op, or `undefined` if the effect wasn't parsed.
+     * @see {@link percentDamage}
+     */
+    private async percentDamage(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID, percent: number,
+        of?: SideID): ReturnType<typeof percentDamage>
+    {
+        return await percentDamage(ctx, side, percent,
+            event =>
+            {
+                if (!this.isEventFromItem(event)) return false;
+                if (of)
+                {
+                    if (!event.kwArgs.of) return false;
+                    const identOf = Protocol.parsePokemonIdent(event.kwArgs.of);
+                    if (identOf.player !== of) return false;
+                }
+                accept();
+                return true;
+            });
+    }
+
+    /**
+     * Expects an event for a status effect with the correct `[from]` suffix.
+     * @param accept Callback to accept this pathway.
+     * @param side Pokemon reference to which to afflict the status.
+     * @param statusTypes Possible statuses to afflict.
+     * @param of Pokemon that should be referenced by the event's `[of]` suffix.
+     * Optional.
+     * @returns The status type that was consumed, or `true` if the effect
+     * couldn't be applied and was a no-op, or `undefined` if no valid event was
+     * found.
+     * @see {@link status}
+     */
+    private async status(ctx: BattleParserContext<"gen4">,
+        accept: unordered.AcceptCallback, side: SideID,
+        statusTypes: readonly StatusType[], of?: SideID):
+        ReturnType<typeof status>
+    {
+        return await status(ctx, side, statusTypes,
+            event =>
+            {
+                if (event.args[0] !== "-message")
+                {
+                    const e = event as
+                        Event<Exclude<StatusEventType, "|-message|">>;
+                    if (!this.isEventFromItem(e)) return false;
+                    if (of)
+                    {
+                        if (!e.kwArgs.of) return false;
+                        const identOf = Protocol.parsePokemonIdent(e.kwArgs.of);
+                        if (identOf.player !== of) return false;
+                    }
+                }
+                accept();
+                return true;
+            });
+    }
+
+    /** Verifies that the event's `[from]` effect suffix matches this Item. */
+    private isEventFromItem(event: Event<Protocol.BattleArgsWithKWArgName>):
+        boolean
+    {
+        const from = Protocol.parseEffect((event.kwArgs as any).from, toIdName);
+        return this.isEffectFromItem(from);
+    }
+
+    /** Verifies that a parsed effect string matches this Item. */
+    private isEffectFromItem(
+        effect: ReturnType<typeof Protocol["parseEffect"]>): boolean
+    {
+        return (!effect.type || effect.type === "item") &&
+            effect.name === this.data.name;
+    }
+
+    /**
+     * Indicates that the item holder received indirect damage from the item, in
+     * order to make ability inferences.
+     */
+    private indirectDamage(ctx: BattleParserContext<"gen4">, side: SideID): void
+    {
+        const holder = ctx.state.getTeam(side).active;
+        if (holder.volatile.suppressAbility) return;
+
+        // can't have an ability that blocks indirect damage
+        const ability = holder.traits.ability;
+        const filteredAbilities =
+            [...ability.possibleValues]
+                .filter(n => ability.map[n].flags?.noIndirectDamage === true);
+        if (filteredAbilities.length >= ability.size)
+        {
+            throw new Error(`Pokemon '${side}' received indirect damage ` +
+                `from item '${this.data.name}' even though its ability ` +
+                `[${[...ability.possibleValues].join(", ")}] suppresses that ` +
+                "damage");
+        }
+        ability.remove(filteredAbilities);
+    }
 
     //#endregion
 }

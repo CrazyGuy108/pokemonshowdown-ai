@@ -666,6 +666,8 @@ handlersImpl["|-activate|"] = async function(ctx: BattleParserContext<"gen4">)
     const v = mon.volatile;
     switch (effect.name)
     {
+        // TODO: delegate to Ability/Item wrappers and effect handlers?
+        // may not want to do this at the event level due to lost context
         case "forewarn":
         {
             if (!other1) break;
